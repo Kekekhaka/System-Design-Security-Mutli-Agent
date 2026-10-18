@@ -1,0 +1,4 @@
+# Optional: embedding retrieval backend (set RAG_BACKEND=chroma).
+# Chroma's default embedding model (all-MiniLM-L6-v2, ONNX) downloads on first use.
+-r requirements.txt
+chromadb>=1.0
