@@ -152,8 +152,10 @@ report JSON is diffable for CI or dashboards.
 ## Export (design to OpenAPI + SQL)
 
 The design loop produces documents, not code. `scripts/export_design.py` turns a
-finished, approved design (for example the `result.json` saved by `RunME.md`) into
-machine-readable specs:
+finished, approved design into machine-readable specs. The input is a JSON file
+holding the `final` event of `/project/design/stream` (keys `approved`,
+`final_architecture`, `api_spec`, `security_audit`, `total_revisions`), saved as
+`result.json` or any name you pass:
 
 ```powershell
 python scripts/export_design.py result.json                    # writes export/result/

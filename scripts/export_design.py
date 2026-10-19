@@ -1,8 +1,8 @@
 """Export a finished design as machine-readable specs.
 
-Reads the JSON a design run returned (for example result.json from RunME.md) and
-writes openapi.yaml and schema.sql, plus the design documents and a manifest, to
-a folder. Two LLM calls; requires OPENROUTER_API_KEY.
+Reads the JSON a design run returned (the `final` event of /project/design/stream,
+saved as result.json) and writes openapi.yaml and schema.sql, plus the design
+documents and a manifest, to a folder. Two LLM calls; requires OPENROUTER_API_KEY.
 
 Usage:
     python scripts/export_design.py result.json
