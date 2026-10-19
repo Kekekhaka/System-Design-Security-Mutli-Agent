@@ -182,6 +182,38 @@ executed: apply `schema.sql` to a scratch Postgres and validate `openapi.yaml` w
 OpenAPI validator before relying on them. The security audit covers the design, not
 this output.
 
+## Reviewing an existing system
+
+Two scripts point the agents at a system that already exists. Both read a folder holding
+`architecture.md` and `api-spec.md` (what the system does today, written factually from
+its README and code) and send them to the configured model provider, so only use material
+you are allowed to share.
+
+```powershell
+# 1. Security review: scope -> analyze -> validate. Writes security-report.md, scope.md,
+#    draft-findings.md and a manifest into the output folder.
+python scripts/review_system.py reviews/my-system
+
+# 2. Revision: the designer + auditor loop applies a change brief (what to adopt, keep and
+#    defer) to the existing design and re-audits it. Produces a revised DESIGN, not code.
+python scripts/revise_system.py reviews/my-system --brief reviews/my-system/change-brief.md
+```
+
+What a test on a real project (a Django student-card system) showed:
+
+- **The audit is only as accurate as its description.** A vague sentence produced a false
+  High finding; missing deployment facts hid real ones (root container, one worker).
+- **One run is not enough.** Repeating the same input found about half the same topics.
+  Run it two or three times and merge the findings.
+- **Design level only.** It cannot see code bugs, and it takes the document at its word.
+- **Fast mode (`LLM_REASONING_EFFORT=none`) suits a single audit pass** (about 75 s instead
+  of about 5 min) but its severities are inflated and it finds fewer issues. Do not use it
+  for the revision loop: the designer then over-engineers and the loop fails to converge.
+- **Read the revised design, not just the verdict.** An approved revision once turned out to
+  be a patch with invented field names. The revision rules now demand a complete spec and
+  exact names from the existing description.
+- Nothing is built or run. The audit covers the design text only.
+
 ## Notes
 
 - Security rules live in `src/agents/security/prompts.py`. The analyze persona

@@ -118,3 +118,46 @@ def test_export_defaults_turn_reasoning_off():
     assert Settings.model_fields["EXPORT_REASONING_EFFORT"].default == "none"
     assert Settings.model_fields["EXPORT_MAX_TOKENS"].default >= 64000
     assert Settings.model_fields["LLM_CALL_TIMEOUT_SECONDS"].default == 1200
+
+
+def test_empty_output_error_reports_token_usage():
+    empty = AIMessage(
+        content="",
+        response_metadata={"finish_reason": "stop"},
+        usage_metadata={
+            "input_tokens": 10,
+            "output_tokens": 18466,
+            "total_tokens": 18476,
+            "output_token_details": {"reasoning": 18466},
+        },
+    )
+    with pytest.raises(ModelOutputError, match=r"output_tokens=18466, reasoning_tokens=18466"):
+        llm_module.checked_content(empty, "security analysis")
+
+
+def test_a_stage_gets_two_retries_after_empty_replies():
+    llm = ScriptedLLM(["", "", "third time"])
+    assert invoke_checked(llm, [], "security analysis") == "third time"
+    assert len(llm.calls) == 3
+    with pytest.raises(ModelOutputError):
+        invoke_checked(ScriptedLLM(["", "", ""]), [], "security analysis")
+
+
+def test_global_reasoning_effort_applies_when_not_set_per_call(monkeypatch):
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "dummy-key")
+    monkeypatch.setattr(settings, "OPENROUTER_FALLBACK_MODEL", "fallback/model")
+    monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "none")
+
+    client = llm_module.get_llm()
+    for model in (client.runnable, *client.fallbacks):
+        assert model.extra_body == {"reasoning": {"effort": "none"}}
+    # An explicit argument still wins.
+    explicit = llm_module.get_llm(reasoning_effort="high")
+    assert explicit.runnable.extra_body == {"reasoning": {"effort": "high"}}
+
+
+def test_no_global_reasoning_effort_leaves_the_model_default(monkeypatch):
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "dummy-key")
+    monkeypatch.setattr(settings, "OPENROUTER_FALLBACK_MODEL", "")
+    monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "")
+    assert not llm_module.get_llm().extra_body

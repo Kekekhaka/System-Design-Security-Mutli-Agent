@@ -87,17 +87,28 @@ def checked_content(response, stage: str) -> str:
         raise ModelOutputError(
             f"The {stage} stage returned "
             f"{'truncated' if content.strip() else 'no'} output "
-            f"(finish_reason={finish_reason!r}). Raise the output token limit "
-            "(LLM_MAX_TOKENS, or EXPORT_MAX_TOKENS for the export) or retry."
+            f"(finish_reason={finish_reason!r}, {_usage_summary(response)}). Raise the "
+            "output token limit (LLM_MAX_TOKENS, or EXPORT_MAX_TOKENS for the export) "
+            "or retry."
         )
     return content
 
 
-def invoke_checked(llm, messages, stage: str, attempts: int = 2) -> str:
+def _usage_summary(response) -> str:
+    """Tokens spent, so an empty reply can be told apart: output equal to
+    reasoning means the budget went on thinking; output near zero is a provider
+    hiccup."""
+    usage = getattr(response, "usage_metadata", None) or {}
+    reasoning = (usage.get("output_token_details") or {}).get("reasoning")
+    return f"output_tokens={usage.get('output_tokens')}, reasoning_tokens={reasoning}"
+
+
+def invoke_checked(llm, messages, stage: str, attempts: int = 3) -> str:
     """Invoke under a deadline and return checked text.
 
-    Empty or truncated output is retried once. A timeout is not retried: the
-    call already used its whole time budget.
+    Empty or truncated output is retried up to twice (seen live: three empty
+    replies in a row across two stages of one audit). A timeout is not retried:
+    the call already used its whole time budget.
     """
     for attempt in range(1, attempts + 1):
         try:
@@ -149,11 +160,13 @@ def get_llm(
             "OPENROUTER_API_KEY is not set. Copy .env.example to .env and add your key."
         )
     use_os_trust_store()
+    # An explicit argument wins; otherwise the global LLM_REASONING_EFFORT applies.
+    effort = reasoning_effort if reasoning_effort is not None else (settings.LLM_REASONING_EFFORT or None)
     primary_model = model or settings.OPENROUTER_MODEL
-    primary = _chat_model(primary_model, temperature, max_tokens, reasoning_effort)
+    primary = _chat_model(primary_model, temperature, max_tokens, effort)
     fallback_model = settings.OPENROUTER_FALLBACK_MODEL
     if fallback_model and fallback_model != primary_model:
         return primary.with_fallbacks(
-            [_chat_model(fallback_model, temperature, max_tokens, reasoning_effort)]
+            [_chat_model(fallback_model, temperature, max_tokens, effort)]
         )
     return primary

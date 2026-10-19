@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     # Output budget per call, reasoning tokens included. DeepSeek V4 Flash can
     # reason past 4096 tokens and return no text at all, so keep this generous.
     LLM_MAX_TOKENS: int = 32000
+    # Reasoning effort for every model call that does not set its own. "" keeps the
+    # model's default (slow and variable: tens of thousands of hidden tokens);
+    # "none" turns reasoning off, the fast mode used for live demos.
+    LLM_REASONING_EFFORT: str = ""
     # Hard deadline for any single model call (0 disables). The longest
     # legitimate call seen so far took about 8 minutes.
     LLM_CALL_TIMEOUT_SECONDS: int = 1200
