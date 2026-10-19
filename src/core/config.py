@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     # Output budget per call, reasoning tokens included. DeepSeek V4 Flash can
     # reason past 4096 tokens and return no text at all, so keep this generous.
     LLM_MAX_TOKENS: int = 32000
+    # Hard deadline for any single model call (0 disables). The longest
+    # legitimate call seen so far took about 8 minutes.
+    LLM_CALL_TIMEOUT_SECONDS: int = 1200
+    # The design-to-spec export is mechanical, so it runs with reasoning off and a
+    # larger output budget for big specs. Measured on DeepSeek V4 Flash: "none"
+    # used 0 reasoning tokens, while "low" and "minimal" used MORE than the
+    # default. Empty string = the model's default.
+    EXPORT_REASONING_EFFORT: str = "none"
+    EXPORT_MAX_TOKENS: int = 64000
     # Verify TLS with the OS certificate store (works behind corporate proxies).
     USE_OS_TRUST_STORE: bool = True
     APP_BASE_URL: str = "http://localhost:8000"

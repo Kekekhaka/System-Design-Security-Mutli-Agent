@@ -37,7 +37,10 @@ instead of from scratch.
 Model: `deepseek/deepseek-v4-flash` via OpenRouter (1M context, ~$0.09/M in, ~$0.18/M out).
 Set `OPENROUTER_FALLBACK_MODEL` to another OpenRouter model id for automatic
 failover on rate limits or provider outages; startup logs a warning while it is
-unset. `LLM_MAX_TOKENS` (default 32000) is the per-call output budget,
+unset. `LLM_CALL_TIMEOUT_SECONDS` (default 1200) is a hard deadline on every model call: a
+provider that keeps a connection alive can stall a request indefinitely (a call was
+seen pending for six hours), so a call that overruns fails with `ModelCallTimeout`
+instead of hanging, and is not retried. `LLM_MAX_TOKENS` (default 32000) is the per-call output budget,
 reasoning included: DeepSeek V4 Flash can reason through a small budget and
 return no text. Any stage that returns empty or truncated output raises
 `ModelOutputError` instead of being treated as "no findings" or a blank design.
@@ -145,6 +148,37 @@ python scripts/eval_security_agent.py --prompt-file winner_persona.txt
 candidate personas or track regressions between prompt revisions. This makes
 real API calls and is intentionally not part of the offline pytest suite; the
 report JSON is diffable for CI or dashboards.
+
+## Export (design to OpenAPI + SQL)
+
+The design loop produces documents, not code. `scripts/export_design.py` turns a
+finished, approved design (for example the `result.json` saved by `RunME.md`) into
+machine-readable specs:
+
+```powershell
+python scripts/export_design.py result.json                    # writes export/result/
+python scripts/export_design.py result.json --out export/guest-house
+```
+
+It writes `openapi.yaml`, `schema.sql`, the three design documents (`design.md`,
+`api-spec.md`, `security-audit.md`) and a `manifest.json`. Two LLM calls run in
+parallel: a few cents, and a large API can take several minutes. If it fails with a
+truncation error, raise `EXPORT_MAX_TOKENS` (default 64000). The export runs with
+reasoning off (`EXPORT_REASONING_EFFORT=none`): measured on DeepSeek V4 Flash, `none`
+used 0 reasoning tokens while `low` and `minimal` used more than the default, and
+with reasoning on the export ran out of tokens before writing anything. A design the security audit did not approve
+is refused unless you pass `--allow-unapproved`. `export/` is gitignored.
+
+The output is generated from the design text, not guaranteed. The script checks the
+OpenAPI document's structure (valid YAML, version, every path has operations with
+responses, every `$ref` resolves, every operation has a security requirement or an
+explicit `security: []`) and the SQL's structure (a `CREATE TABLE` exists, parentheses
+balance, no `DROP` / `TRUNCATE` / `DELETE`). With `pip install sqlglot` the SQL is also
+parsed, which catches most syntax errors but nothing semantic. Anything flagged is
+listed in `manifest.json`, printed, and gives exit code 2. Neither file has been
+executed: apply `schema.sql` to a scratch Postgres and validate `openapi.yaml` with an
+OpenAPI validator before relying on them. The security audit covers the design, not
+this output.
 
 ## Notes
 

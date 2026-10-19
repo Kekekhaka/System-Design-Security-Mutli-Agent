@@ -1,4 +1,6 @@
+import contextvars
 import logging
+import threading
 from functools import lru_cache
 
 from langchain_core.runnables import Runnable
@@ -30,6 +32,47 @@ class ModelOutputError(RuntimeError):
     """A model call returned no usable text."""
 
 
+class ModelCallTimeout(RuntimeError):
+    """A model call did not finish within LLM_CALL_TIMEOUT_SECONDS."""
+
+
+def call_with_deadline(fn, stage: str, timeout: float | None = None):
+    """Run `fn()` and return its result, or raise ModelCallTimeout after `timeout` seconds.
+
+    The HTTP client's own timeouts do not bound a whole call: a provider that keeps
+    the connection alive with keep-alive bytes can stall a request indefinitely
+    (seen live: a call still pending after six hours). `fn` runs in a daemon thread
+    with the caller's context copied, so LangGraph callbacks and streaming events
+    keep working. On timeout the thread is abandoned, not killed; it ends whenever
+    the request does. A `timeout` of 0 or less disables the deadline.
+    """
+    seconds = settings.LLM_CALL_TIMEOUT_SECONDS if timeout is None else timeout
+    if not seconds or seconds <= 0:
+        return fn()
+
+    outcome: dict = {}
+    context = contextvars.copy_context()
+
+    def target() -> None:
+        try:
+            outcome["value"] = context.run(fn)
+        except BaseException as exc:  # re-raised in the caller below
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=target, daemon=True, name=f"llm-{stage}")
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        raise ModelCallTimeout(
+            f"The {stage} stage did not finish within {seconds:g}s. Raise "
+            "LLM_CALL_TIMEOUT_SECONDS if the output is legitimately that long, "
+            "otherwise retry."
+        )
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
 def checked_content(response, stage: str) -> str:
     """Return the response text, refusing empty or truncated output.
 
@@ -44,17 +87,22 @@ def checked_content(response, stage: str) -> str:
         raise ModelOutputError(
             f"The {stage} stage returned "
             f"{'truncated' if content.strip() else 'no'} output "
-            f"(finish_reason={finish_reason!r}). Raise LLM_MAX_TOKENS "
-            f"(currently {settings.LLM_MAX_TOKENS}) or retry."
+            f"(finish_reason={finish_reason!r}). Raise the output token limit "
+            "(LLM_MAX_TOKENS, or EXPORT_MAX_TOKENS for the export) or retry."
         )
     return content
 
 
 def invoke_checked(llm, messages, stage: str, attempts: int = 2) -> str:
-    """Invoke and return checked text, retrying once on empty or truncated output."""
+    """Invoke under a deadline and return checked text.
+
+    Empty or truncated output is retried once. A timeout is not retried: the
+    call already used its whole time budget.
+    """
     for attempt in range(1, attempts + 1):
         try:
-            return checked_content(llm.invoke(messages), stage)
+            response = call_with_deadline(lambda: llm.invoke(messages), stage)
+            return checked_content(response, stage)
         except ModelOutputError:
             if attempt == attempts:
                 raise
@@ -62,25 +110,39 @@ def invoke_checked(llm, messages, stage: str, attempts: int = 2) -> str:
     raise AssertionError("unreachable")
 
 
-def _chat_model(model: str, temperature: float) -> ChatOpenAI:
+def _chat_model(
+    model: str,
+    temperature: float,
+    max_tokens: int | None = None,
+    reasoning_effort: str | None = None,
+) -> ChatOpenAI:
+    extra = {"extra_body": {"reasoning": {"effort": reasoning_effort}}} if reasoning_effort else {}
     return ChatOpenAI(
         model=model,
         api_key=settings.OPENROUTER_API_KEY,
         base_url=settings.OPENROUTER_BASE_URL,
         temperature=temperature,
-        max_tokens=settings.LLM_MAX_TOKENS,
+        max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
         default_headers={
             "HTTP-Referer": settings.APP_BASE_URL,
             "X-Title": settings.APP_TITLE,
         },
+        **extra,
     )
 
 
-def get_llm(temperature: float = 0.1, model: str | None = None) -> Runnable:
+def get_llm(
+    temperature: float = 0.1,
+    model: str | None = None,
+    max_tokens: int | None = None,
+    reasoning_effort: str | None = None,
+) -> Runnable:
     """Return a DeepSeek V4 Flash client via OpenRouter.
 
     When OPENROUTER_FALLBACK_MODEL is set, transient failures or rate limits on
     the primary model fall through to the fallback model on the same provider.
+    `max_tokens` overrides LLM_MAX_TOKENS, and `reasoning_effort` ("low", "medium",
+    "high", ...) sets OpenRouter's reasoning effort for both models.
     """
     if not settings.OPENROUTER_API_KEY:
         raise RuntimeError(
@@ -88,8 +150,10 @@ def get_llm(temperature: float = 0.1, model: str | None = None) -> Runnable:
         )
     use_os_trust_store()
     primary_model = model or settings.OPENROUTER_MODEL
-    primary = _chat_model(primary_model, temperature)
+    primary = _chat_model(primary_model, temperature, max_tokens, reasoning_effort)
     fallback_model = settings.OPENROUTER_FALLBACK_MODEL
     if fallback_model and fallback_model != primary_model:
-        return primary.with_fallbacks([_chat_model(fallback_model, temperature)])
+        return primary.with_fallbacks(
+            [_chat_model(fallback_model, temperature, max_tokens, reasoning_effort)]
+        )
     return primary

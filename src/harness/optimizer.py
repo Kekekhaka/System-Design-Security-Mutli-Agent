@@ -13,7 +13,7 @@ from src.agents.nodes import is_approved
 from src.agents.security.graph import build_security_subgraph
 from src.agents.security.prompts import with_review_emphasis
 from src.core.config import settings
-from src.core.llm import get_llm
+from src.core.llm import call_with_deadline, get_llm
 from src.knowledge.retriever import load_default_retriever
 
 logger = logging.getLogger(__name__)
@@ -88,14 +88,13 @@ def parse_candidates(content: str, count: int) -> list[str]:
 
 def make_propose_node(llm):
     def propose_node(state: HarnessState) -> dict:
-        response = llm.invoke(
-            [
-                SystemMessage(content=PROPOSE_SYSTEM_PROMPT),
-                HumanMessage(
-                    content=build_propose_prompt(state["task"], settings.HARNESS_CANDIDATES)
-                ),
-            ]
-        )
+        messages = [
+            SystemMessage(content=PROPOSE_SYSTEM_PROMPT),
+            HumanMessage(
+                content=build_propose_prompt(state["task"], settings.HARNESS_CANDIDATES)
+            ),
+        ]
+        response = call_with_deadline(lambda: llm.invoke(messages), "harness propose")
         return {
             "candidate_prompts": parse_candidates(
                 response.content, settings.HARNESS_CANDIDATES

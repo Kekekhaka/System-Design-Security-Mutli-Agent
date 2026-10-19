@@ -9,6 +9,8 @@ Follow this six-step framework and label your sections:
 4. Data model: schema and the access patterns that drive indexes and partitioning.
 5. High-level design: boxes and arrows for the happy path, then the async paths.
 6. Deep dives and tradeoffs: the riskiest parts (contention, hot keys, single points of failure) and a tradeoff checklist - consistency vs availability (state which operations need strong consistency), latency vs cost, simplicity vs scale. For each failure mode name the resilience pattern (retries with backoff, circuit breakers, dead-letter queues). End with possible extensions (analytics, personalization, fraud checks, multi-region).
+7. Frontend experience (include only when the product has a user interface): choose the stack for the job and justify it in a sentence or two against this product's users and constraints (for example React/Next.js, Svelte/SvelteKit, Vue/Nuxt or Astro). Start from a design system: name the tokens for colour, type, spacing and motion, and the type pairing and scale. Make specific design choices tied to this product and its users, and write real microcopy for them. Avoid the generic AI-generated look: no default gradient hero with three feature cards, no stock filler copy ("Unlock the power of", "Seamless", "Revolutionise"), no emoji as icons (pick one coherent icon set), no uniform rounded-and-shadowed styling, and motion only where it explains something. Set the quality bar: WCAG 2.2 AA, Core Web Vitals targets, responsive and mobile-first, component-driven TypeScript with unit and visual or end-to-end tests.
+8. Build standards for the backend: the API spec in this design is the contract the builders implement exactly, and any change goes back through design review. Validate at every trust boundary. Services are idempotent, predictable and observable. Data changes go through versioned migrations only. Follow REST or GraphQL conventions and document the API in OpenAPI. Build in the relevant OWASP ASVS controls and name the level you target. Configuration is 12-factor and secrets never live in code. Include structured logging, metrics and tracing hooks. Test with unit and integration tests, plus contract tests against the API spec.
 
 Security is a first-class requirement: authenticate every endpoint, authorize every \
 object access, keep secrets in a managed store, and encrypt sensitive data in transit \
@@ -19,7 +21,7 @@ that were already sound, and never reintroduce a rejected pattern.
 
 Output format (strict, both markers required):
 ===ARCHITECTURE===
-(sections 1, 2, 5 and 6 here)
+(sections 1, 2, 5, 6, 7 and 8 here)
 ===API SPEC===
 (sections 3 and 4 here)
 

@@ -18,7 +18,7 @@ from src.agents.security.report import (
     render_unparsed,
 )
 from src.core.config import settings
-from src.core.llm import invoke_checked
+from src.core.llm import call_with_deadline, invoke_checked
 from src.knowledge.retriever import format_references
 
 
@@ -88,18 +88,17 @@ def build_security_subgraph(llm, system_prompt: str | None = None, retriever=Non
     )
 
     def validate_node(state: SecurityState) -> dict:
-        output = validator.invoke(
-            [
-                SystemMessage(content=VALIDATE_SYSTEM_PROMPT),
-                HumanMessage(
-                    content=build_validate_prompt(
-                        state.get("architecture"),
-                        state.get("api_spec"),
-                        state.get("draft_findings", ""),
-                    )
-                ),
-            ]
-        )
+        messages = [
+            SystemMessage(content=VALIDATE_SYSTEM_PROMPT),
+            HumanMessage(
+                content=build_validate_prompt(
+                    state.get("architecture"),
+                    state.get("api_spec"),
+                    state.get("draft_findings", ""),
+                )
+            ),
+        ]
+        output = call_with_deadline(lambda: validator.invoke(messages), "security validation")
         report = output.get("parsed")
         if not isinstance(report, SecurityReport):
             raw = output.get("raw")
