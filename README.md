@@ -64,8 +64,39 @@ roles = load_roles()              # dict[str, Role]
 prompt = role_prompt("architect") # team rules + the architect role body
 ```
 
-Phase 2 will wire the new roles into the graph; today the designer and security
-agents only carry the architect and security-engineer standards inline.
+### Team pipeline
+
+`src/agents/team/graph.py` runs the roles as a team, next to the original
+supervisor graph (which is unchanged):
+
+```
+team lead (plan) -> ideologist* -> business analyst* -> architect <-> security engineer -> team lead (sign-off)
+                                                         * only when the team lead staffs them
+```
+
+- The **team lead** sizes the job (small / quick / full), staffs only the roles
+  it needs and records why the others were skipped. Its JSON plan is checked in
+  code: unknown roles are dropped, the architect and security engineer always
+  run, and an unreadable plan falls back to the default quick plan.
+- If the scope is unclear, the team lead's questions **stop the run** for the
+  operator instead of being guessed. Rerun with the answers.
+- The **business analyst** writes requirements with IDs (FR-nn, AC-nn), which
+  the architect must trace its design to.
+- Fix rounds follow the team rules: **quick allows one, full allows two**. After
+  that the run **escalates** instead of looping.
+- The sign-off's verdict line is **computed in code**; the model writes the rest.
+- Every role leaves a handoff note, and routing decisions go into a decision log.
+
+```powershell
+python scripts/run_team.py "Design a booking API for a small clinic."
+python scripts/run_team.py --brief-file brief.md --answers "Single clinic; no payments."
+```
+
+Artifacts go to `runs/<timestamp>/` (gitignored). Exit codes: 0 approved,
+1 could not run, 2 escalated, 3 the team lead needs answers.
+
+Not built yet (phase 3): an engineer role that writes code with opencode in an
+isolated branch, a security review of the real diff, and QA that runs the tests.
 
 ## Setup
 
