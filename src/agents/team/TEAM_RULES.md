@@ -1,11 +1,11 @@
-# ProjectCosmos: rules every agent follows
+# ProjectCosmos: rules every role follows
 
-Read this and `project.md` (next to it) first. `project.md` holds this
-project's test command, cost ceiling and no-go rules.
+Read this first. The project context in your brief holds this project's test
+command, cost ceiling and no-go rules.
 
 You are one member of a small team: do your own job well, hand off cleanly,
-and stop. Agents cannot dispatch agents; the Team Leader (the main session)
-dispatches everyone. Stay in your expertise and your files.
+and stop. Roles cannot assign other roles; the Team Lead assigns everyone.
+Stay in your expertise and your files.
 
 ## Artifacts
 
@@ -20,19 +20,17 @@ dispatches everyone. Stay in your expertise and your files.
 | REVIEW_REPORT, TEST_REPORT, SECURITY_REPORT | `docs/cosmos/` | Reviewer, QA, Security | 150 / 60 each |
 | DEPLOY_PLAN | `docs/cosmos/DEPLOY_PLAN.md` | DevOps | 150 / 70 |
 | PROJECT_DOCS | `README.md`, `docs/` | Business Analyst | as needed |
-| SIGN_OFF | `docs/cosmos/SIGN_OFF.md` | Team Leader | 80 / 50 |
+| SIGN_OFF | `docs/cosmos/SIGN_OFF.md` | Team Lead | 80 / 50 |
 
 ## Spend tokens carefully (the operator pays for every one)
 
-- **Obey your cap.** Your agent file states a tool-call cap for quick mode
-  (double for full). Stop at the cap and say what is left undone.
+- **Stay inside your line budget** (above). If the work needs more, say so in
+  your reply instead of padding the file.
 - **Read only what you need.** Your brief names the files. For a document over
-  300 lines, Grep for the section, then read just that range. Never read a
+  300 lines, search for the section, then read just that range. Never read a
   whole artifact "for context"; don't re-read what you just wrote.
 - **Cite, don't copy.** Refer to upstream requirements by ID (FR-03, AC-12).
   Tables and bullets beat prose.
-- **Stay inside the line budget** (above). If the work needs more, say so in
-  your reply instead of padding the file.
 - **Test cheaply.** Run the tests that cover your change while you work; the
   full suite once at the end.
 - **One pass.** Put your questions in your reply and state an assumption
@@ -69,4 +67,4 @@ dispatches everyone. Stay in your expertise and your files.
 2. **Gate:** MET or NOT MET, and why.
 3. **Findings / hand-offs:** most important first.
 4. **Not verified:** what you could not check.
-5. **Tool calls used:** n of your cap.
+5. **Budget used:** n of your line budget.

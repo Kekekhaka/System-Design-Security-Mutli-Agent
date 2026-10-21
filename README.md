@@ -45,6 +45,28 @@ reasoning included: DeepSeek V4 Flash can reason through a small budget and
 return no text. Any stage that returns empty or truncated output raises
 `ModelOutputError` instead of being treated as "no findings" or a blank design.
 
+## Team roles
+
+The role prompts live in `src/agents/team/`: `TEAM_RULES.md` (rules every role
+follows) and one markdown file per role in `roles/` (team lead, ideologist,
+business analyst, architect, security engineer, DevOps engineer, lead engineer,
+backend engineer, frontend engineer, reviewer, QA analyst). They were adapted
+from the ProjectCosmos Claude Code agent team: the front matter now describes
+the pipeline `stage`, the `artifact` the role produces and `used_when` to staff
+it, and the Claude Code-specific tool and agent instructions are gone.
+
+Load them with `src.agents.team.roles`:
+
+```python
+from src.agents.team.roles import load_roles, role_prompt
+
+roles = load_roles()              # dict[str, Role]
+prompt = role_prompt("architect") # team rules + the architect role body
+```
+
+Phase 2 will wire the new roles into the graph; today the designer and security
+agents only carry the architect and security-engineer standards inline.
+
 ## Setup
 
 ```powershell
