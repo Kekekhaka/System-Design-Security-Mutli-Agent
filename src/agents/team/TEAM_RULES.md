@@ -57,13 +57,15 @@ The pipeline writes every artifact into one run folder (`runs/<timestamp>/`).
 
 | Artifact | File | Owner | Lines (full / quick) |
 |---|---|---|---|
-| IDEA_BRIEF | `IDEA_BRIEF.md` | Ideologist | 150 / 60 |
 | REQUIREMENTS_PACK (including any ADRs) | `REQUIREMENTS_PACK.md` | Business analyst | 350 / 150 |
-| Design (house format) | `architecture.md`, `api-spec.md` | Architect | 350 / 100 |
-| SECURITY_REPORT | `security-report.md` | Security engineer | 150 / 60 |
-| WORK_BREAKDOWN, IMPLEMENTATION | `WORK_BREAKDOWN.md`, `IMPLEMENTATION.md` | Lead engineer or the engineer | 150 / 60 |
-| REVIEW_REPORT, TEST_REPORT | `REVIEW_REPORT.md`, `TEST_REPORT.md` | Reviewer, QA | 150 / 60 |
+| Design (house format) | `architecture.md`, `api-spec.md` | Designer | 350 / 100 |
+| SECURITY_REPORT (design audit) | `security-report.md` | Security engineer | 150 / 60 |
+| IMPLEMENTATION | the code itself, on the build branch | Backend / frontend engineer | - |
+| TEST_REPORT | `TEST_REPORT.md` (the real test run) | QA (written by the pipeline) | - |
+| REVIEW_REPORT | `REVIEW_REPORT.md` | Reviewer | 150 / 60 |
+| SECURITY_REPORT (code audit) | `code-security-report.md` | Security engineer | 150 / 60 |
 | DEPLOY_PLAN | `DEPLOY_PLAN.md` | DevOps | 150 / 70 |
+| PROJECT_DOCS (BA pass 2) | `PROJECT_DOCS.md` | Business analyst | as needed |
 | SIGN_OFF | `SIGN_OFF.md` | Team lead | 80 / 50 |
 | Plan, handoffs, decision log | `team-log.json` | Team lead (written by the pipeline) | - |
 
@@ -93,7 +95,7 @@ The pipeline writes every artifact into one run folder (`runs/<timestamp>/`).
 4. **Git:** never commit, push, reset or change config. The operator commits.
 5. **Cost:** add nothing that costs money without the operator's explicit
    approval. Label any price or free-tier limit you could not verify
-   **unverified**. The architect owns the cost budget.
+   **unverified**. The designer owns the cost budget.
 
 ## Reply format (at most 150 words, when your stage asks for a reply)
 

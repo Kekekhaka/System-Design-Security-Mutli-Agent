@@ -9,17 +9,18 @@ from src.agents.team.roles import Role, load_roles, role_prompt, team_rules
 TEAM_DIR = Path(__file__).resolve().parents[1] / "src" / "agents" / "team"
 ROLE_NAMES = {
     "team-lead",
-    "ideologist",
     "business-analyst",
-    "architect",
+    "designer",
     "security-engineer",
-    "devops-engineer",
-    "lead-engineer",
     "backend-engineer",
     "frontend-engineer",
-    "reviewer",
     "qa-analyst",
+    "reviewer",
+    "devops-engineer",
 }
+# Retired: the ideologist duplicated the business analyst, the lead engineer
+# duplicated the team lead and the designer, and "architect" is the house designer.
+RETIRED = ("ideologist", "lead-engineer", "architect")
 FORBIDDEN = (
     "subagent_type",
     ".claude/",
@@ -113,9 +114,9 @@ def test_reviewing_roles_use_the_house_severity_and_verdict() -> None:
 
 def test_core_roles_follow_the_house_pipeline() -> None:
     roles = load_roles()
-    assert "===ARCHITECTURE===" in roles["architect"].body
-    assert "===API SPEC===" in roles["architect"].body
-    assert roles["architect"].used_when.startswith("Every run")
+    assert "===ARCHITECTURE===" in roles["designer"].body
+    assert "===API SPEC===" in roles["designer"].body
+    assert roles["designer"].used_when.startswith("Every run")
     assert roles["security-engineer"].used_when.startswith("Every run")
     lead = roles["team-lead"].body
     assert "MAX_REVISIONS" in lead
@@ -123,8 +124,8 @@ def test_core_roles_follow_the_house_pipeline() -> None:
 
 
 def test_role_prompt_combines_rules_and_body() -> None:
-    prompt = role_prompt("architect")
-    role = load_roles()["architect"]
+    prompt = role_prompt("designer")
+    role = load_roles()["designer"]
 
     assert prompt.startswith(team_rules())
     assert prompt.endswith(role.body)
@@ -199,14 +200,14 @@ def test_load_roles_rejects_missing_exit_gate(tmp_path: Path) -> None:
         load_roles(tmp_path)
 
 
-def test_designer_prompt_has_architect_standards() -> None:
+def test_designer_prompt_has_designer_standards() -> None:
     prompt = DESIGNER_SYSTEM_PROMPT
 
-    assert "Architect role (team standards):" in prompt
+    assert "Designer role (team standards):" in prompt
     assert "Cost budget" in prompt
     assert "===ARCHITECTURE===" in prompt
     assert "===API SPEC===" in prompt
-    assert prompt.index("Architect role (team standards):") < prompt.index(
+    assert prompt.index("Designer role (team standards):") < prompt.index(
         "Output format (strict"
     )
 
@@ -223,3 +224,20 @@ def test_security_prompt_has_security_engineer_standards() -> None:
     assert protocol.startswith("Output protocol (strict):")
     assert 'start your reply with exactly "APPROVED"' in protocol
     assert '"CHANGES REQUESTED"' in protocol
+
+
+def test_retired_roles_are_gone_and_not_referenced() -> None:
+    roles = load_roles()
+    texts = [team_rules(), *(role.body for role in roles.values())]
+    for retired in RETIRED:
+        assert retired not in roles
+    for text in texts:
+        assert "ideologist" not in text.lower()
+        assert "lead-engineer" not in text and "lead engineer" not in text.lower()
+
+
+def test_every_role_works_like_a_professional() -> None:
+    # A real expert knows when to stop and when to escalate, not only what to do.
+    for name, role in load_roles().items():
+        assert "## Escalate" in role.body, name
+        assert "senior" in role.body.lower() or name == "team-lead", name

@@ -47,6 +47,16 @@ class Settings(BaseSettings):
 
     HARNESS_CANDIDATES: int = 3
 
+    # Team build runs (scripts/run_team.py --build): the engineers and QA are
+    # opencode runs in an isolated git worktree; the tests run there for real.
+    OPENCODE_BIN: str = "opencode"
+    OPENCODE_MODEL: str = "opencode/deepseek-v4.1-flash-free"
+    ENGINEER_TIMEOUT_SECONDS: int = 1800
+    TEAM_TEST_COMMAND: str = "python -m pytest -q"
+    TEAM_TEST_TIMEOUT_SECONDS: int = 900
+    # The diff reviewers see; longer diffs are cut with a note saying so.
+    BUILD_DIFF_MAX_CHARS: int = 60000
+
     SECURITY_RAG_ENABLED: bool = True
     SECURITY_RAG_TOP_K: int = 3
     KNOWLEDGE_DIR: str = ""

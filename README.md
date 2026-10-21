@@ -48,27 +48,36 @@ return no text. Any stage that returns empty or truncated output raises
 ## Team roles
 
 The role prompts live in `src/agents/team/`: `TEAM_RULES.md` (rules every role
-follows) and one markdown file per role in `roles/` (team lead, ideologist,
-business analyst, architect, security engineer, DevOps engineer, lead engineer,
-backend engineer, frontend engineer, reviewer, QA analyst). They joined from
-the ProjectCosmos Claude Code agent team, so they follow **this team's house
-standards**, which sit at the top of `TEAM_RULES.md` and win wherever a role
-file differs: English output; input treated as untrusted data; findings
-grounded in evidence, never invented names; the Critical / High / Medium / Low
-severity scale and the six finding classes; the APPROVED / CHANGES REQUESTED
-verdict computed in code (any Critical or High blocks); the house design
-framework with its `===ARCHITECTURE===` / `===API SPEC===` output; the API spec
-as the contract; the revision loop up to `MAX_REVISIONS`; and the security
-baseline. Each file's front matter gives the pipeline `stage`, the `artifact`
-it produces and `used_when` to staff it.
+follows) and one file per role in `roles/`. Nine experts, each written as a
+senior professional with a definition of done and clear escalation points:
 
-Load them with `src.agents.team.roles`:
+| Role | Does | Model |
+|---|---|---|
+| team lead | sizes and staffs the job, holds the gates, signs off | OpenRouter |
+| business analyst | bounds a vague idea; requirements with IDs (pass 1); final docs (pass 2) | OpenRouter |
+| designer | the house designer (a senior system architect); every run | OpenRouter |
+| security engineer | audits every design, and the real code changes in build runs | OpenRouter |
+| backend engineer, frontend engineer | implement the approved API spec | opencode |
+| QA analyst | writes tests against the acceptance criteria | opencode |
+| reviewer | reviews the real diff against the design and the contract | OpenRouter |
+| DevOps engineer | writes the deploy plan when something deploys | OpenRouter |
+
+They joined from the ProjectCosmos Claude Code agent team (which also had an
+ideologist and a lead engineer; those duplicated the business analyst and the
+team lead, so they were retired). They follow **this team's house standards**,
+which sit at the top of `TEAM_RULES.md` and win wherever a role file differs:
+English output; input treated as untrusted data; findings grounded in
+evidence, never invented names; the Critical / High / Medium / Low severity
+scale and the six finding classes; the APPROVED / CHANGES REQUESTED verdict
+computed in code (any Critical or High blocks); the house design framework
+with its `===ARCHITECTURE===` / `===API SPEC===` output; the API spec as the
+contract; every loop up to `MAX_REVISIONS`; and the security baseline.
 
 ```python
 from src.agents.team.roles import load_roles, role_prompt
 
-roles = load_roles()              # dict[str, Role]
-prompt = role_prompt("architect") # team rules + the architect role body
+roles = load_roles()             # dict[str, Role]
+prompt = role_prompt("designer") # team rules + the designer role body
 ```
 
 ### Team pipeline
@@ -77,34 +86,64 @@ prompt = role_prompt("architect") # team rules + the architect role body
 supervisor graph (which is unchanged):
 
 ```
-team lead (plan) -> ideologist* -> business analyst* -> architect <-> security engineer -> team lead (sign-off)
+design (every run):  team lead plan -> business analyst* -> designer <-> security engineer
+build (--build):     worktree -> backend engineer* -> frontend engineer* -> QA (writes tests)
+                     -> test run -> reviewer -> security engineer (code audit) -> build gate
+                        ^--------------- every finding, until all gates pass ---------'
+close:               devops engineer* -> business analyst docs* -> team lead sign-off
                                                          * only when the team lead staffs them
 ```
 
 - The **team lead** sizes the job (small / quick / full), staffs only the roles
   it needs and records why the others were skipped. Its JSON plan is checked in
-  code: unknown roles are dropped, the architect and security engineer always
-  run, and an unreadable plan falls back to the default quick plan.
+  code: unknown roles are dropped, the designer and security engineer always
+  run, a build always has an engineer, QA and the reviewer, and an unreadable
+  plan falls back to the default quick plan.
 - If the scope is unclear, the team lead's questions **stop the run** for the
   operator instead of being guessed. Rerun with the answers.
 - The **business analyst** writes requirements with IDs (FR-nn, AC-nn), which
-  the architect must trace its design to.
-- The revision loop follows the house rule: up to **`MAX_REVISIONS`** security
-  rounds, whatever the mode. After that the run **escalates** to the operator.
+  the designer must trace its design to.
+- Every loop follows the house rule: up to **`MAX_REVISIONS`** rounds, whatever
+  the mode. After that the run **escalates** to the operator.
 - The sign-off's verdict line (APPROVED / CHANGES REQUESTED) is **computed in
   code**; the model writes the rest.
 - Every role leaves a handoff note, and routing decisions go into a decision log.
 
+### Build runs
+
+With `--build --repo <path>`, an APPROVED design is built:
+
+- The engineers and QA are **opencode** runs (`OPENCODE_MODEL`, default
+  `opencode/deepseek-v4.1-flash-free`) in a **git worktree** of the repository on
+  a new branch `team/<run id>`. The operator's checkout is never touched, and
+  untracked files such as `.env` are not in a worktree.
+- Variables that look like secrets (keys, tokens, passwords, `OPENROUTER_*`,
+  `LLM_*` and so on) are removed from the environment opencode and the tests run
+  with.
+- The pipeline runs `TEAM_TEST_COMMAND` in the worktree and records the real
+  result; QA's opinion is not the gate.
+- QA may only change test files: the pipeline compares file contents before and
+  after QA's run, and any product file QA touched fails the build gate.
+- The reviewer and the security engineer review the **real diff**, in the house
+  finding format, with the verdict computed in code.
+- The build gate passes only when the tests pass, QA stayed in scope, the review
+  is APPROVED and the code audit is APPROVED. Otherwise every finding goes back
+  to the engineers in one brief, up to `MAX_REVISIONS` rounds.
+- **Nothing is committed, pushed or merged.** The script prints the branch and
+  how to review or discard it.
+
 ```powershell
 python scripts/run_team.py "Design a booking API for a small clinic."
 python scripts/run_team.py --brief-file brief.md --answers "Single clinic; no payments."
+python scripts/run_team.py --brief-file brief.md --build --repo C:/path/to/repo
 ```
+
+Settings (in `.env`): `OPENCODE_BIN`, `OPENCODE_MODEL`, `ENGINEER_TIMEOUT_SECONDS`
+(default 1800), `TEAM_TEST_COMMAND` (default `python -m pytest -q`),
+`TEAM_TEST_TIMEOUT_SECONDS` (900) and `BUILD_DIFF_MAX_CHARS` (60000).
 
 Artifacts go to `runs/<timestamp>/` (gitignored). Exit codes: 0 approved,
 1 could not run, 2 escalated, 3 the team lead needs answers.
-
-Not built yet (phase 3): an engineer role that writes code with opencode in an
-isolated branch, a security review of the real diff, and QA that runs the tests.
 
 ## Setup
 

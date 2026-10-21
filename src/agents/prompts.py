@@ -19,7 +19,7 @@ and at rest.
 When security feedback is provided you MUST address every finding, keep the parts \
 that were already sound, and never reintroduce a rejected pattern.
 
-Architect role (team standards):
+Designer role (team standards):
 - Trace each choice to a requirement or constraint; cite its ID when the requirements \
 have IDs, and never invent one.
 - Prefer simple, proven patterns over novel or fashionable designs.
