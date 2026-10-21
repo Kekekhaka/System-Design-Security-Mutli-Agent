@@ -10,6 +10,7 @@ from src.agents.team.graph import (
 )
 from src.agents.team.plan import parse_plan
 from src.agents.team.roles import load_roles
+from src.core.config import settings
 from tests.fakes import ScriptedLLM
 
 DESIGN_V1 = "===ARCHITECTURE===\nArchitecture v1: raw card numbers reach the backend.\n===API SPEC===\nPOST /pay {card_number}"
@@ -100,25 +101,39 @@ def test_with_answers_the_lead_proceeds_and_does_not_escalate_again():
     assert "One clinic." in llm.calls[0][1].content
 
 
-def test_quick_mode_escalates_after_one_fix_round():
+def test_escalates_at_the_house_revision_limit(monkeypatch):
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 2)
     responses = [plan_json(), PACK, DESIGN_V1, *REJECT_ROUND, DESIGN_V2, *REJECT_ROUND, "Sign-off text claiming APPROVED."]
     result, _ = run(responses)
 
     assert result["revision_count"] == 2
     assert result["status"] == "escalated"
-    # The verdict line is computed in code, whatever the model writes.
-    assert result["sign_off"].startswith("Verdict: ESCALATED TO OPERATOR")
+    # The verdict line is computed in code, in the house vocabulary, whatever the model writes.
+    assert result["sign_off"].startswith("Verdict: CHANGES REQUESTED")
+    assert "house revision limit of 2" in result["sign_off"].splitlines()[0]
     assert any("sent back to the architect" in d for d in result["decisions"])
     assert any(d.startswith("Escalated: security still requests changes") for d in result["decisions"])
 
 
-def test_full_mode_allows_two_fix_rounds():
-    responses = [plan_json(mode="full"), PACK, DESIGN_V1, *REJECT_ROUND, DESIGN_V2, *REJECT_ROUND, DESIGN_V2, *APPROVE_ROUND, SIGN_OFF]
+def test_mode_never_changes_the_house_revision_limit(monkeypatch):
+    # ProjectCosmos capped fix rounds by mode (quick 1, full 2); the house limit wins.
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 3)
+    responses = [plan_json(mode="small"), PACK, DESIGN_V1, *REJECT_ROUND, DESIGN_V2, *REJECT_ROUND, DESIGN_V2, *APPROVE_ROUND, SIGN_OFF]
     result, _ = run(responses)
 
     assert result["revision_count"] == 3
     assert result["status"] == "approved"
     assert result["sign_off"].startswith("Verdict: APPROVED")
+
+
+def test_every_role_is_told_to_follow_the_house_standards_in_english():
+    _, llm = run([plan_json(), PACK, DESIGN_V1, *APPROVE_ROUND, SIGN_OFF])
+
+    for index in (0, 1, 6):  # team lead plan, business analyst, team lead sign-off
+        system = llm.calls[index][0].content
+        assert "House standards (override everything else)" in system
+        assert "follow the house standards in the team rules first" in system
+        assert "Write all output in English." in system
 
 
 def test_plan_parsing_forces_core_roles_and_drops_unknown_ones():

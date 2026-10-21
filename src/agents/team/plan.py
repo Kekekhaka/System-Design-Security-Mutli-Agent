@@ -17,10 +17,6 @@ PIPELINE_ROLES = ("ideologist", "business-analyst", "architect", "security-engin
 ALWAYS_STAFFED = ("architect", "security-engineer")
 MODES = ("small", "quick", "full")
 
-# Security reviews allowed per mode: the first review plus the team rules' fix
-# rounds (quick: one fix round, full: two). After that the run escalates.
-SECURITY_ROUNDS = {"small": 2, "quick": 2, "full": 3}
-
 MAX_QUESTIONS = 5
 MAX_DECISIONS = 10
 

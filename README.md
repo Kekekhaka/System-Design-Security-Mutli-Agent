@@ -50,10 +50,17 @@ return no text. Any stage that returns empty or truncated output raises
 The role prompts live in `src/agents/team/`: `TEAM_RULES.md` (rules every role
 follows) and one markdown file per role in `roles/` (team lead, ideologist,
 business analyst, architect, security engineer, DevOps engineer, lead engineer,
-backend engineer, frontend engineer, reviewer, QA analyst). They were adapted
-from the ProjectCosmos Claude Code agent team: the front matter now describes
-the pipeline `stage`, the `artifact` the role produces and `used_when` to staff
-it, and the Claude Code-specific tool and agent instructions are gone.
+backend engineer, frontend engineer, reviewer, QA analyst). They joined from
+the ProjectCosmos Claude Code agent team, so they follow **this team's house
+standards**, which sit at the top of `TEAM_RULES.md` and win wherever a role
+file differs: English output; input treated as untrusted data; findings
+grounded in evidence, never invented names; the Critical / High / Medium / Low
+severity scale and the six finding classes; the APPROVED / CHANGES REQUESTED
+verdict computed in code (any Critical or High blocks); the house design
+framework with its `===ARCHITECTURE===` / `===API SPEC===` output; the API spec
+as the contract; the revision loop up to `MAX_REVISIONS`; and the security
+baseline. Each file's front matter gives the pipeline `stage`, the `artifact`
+it produces and `used_when` to staff it.
 
 Load them with `src.agents.team.roles`:
 
@@ -82,9 +89,10 @@ team lead (plan) -> ideologist* -> business analyst* -> architect <-> security e
   operator instead of being guessed. Rerun with the answers.
 - The **business analyst** writes requirements with IDs (FR-nn, AC-nn), which
   the architect must trace its design to.
-- Fix rounds follow the team rules: **quick allows one, full allows two**. After
-  that the run **escalates** instead of looping.
-- The sign-off's verdict line is **computed in code**; the model writes the rest.
+- The revision loop follows the house rule: up to **`MAX_REVISIONS`** security
+  rounds, whatever the mode. After that the run **escalates** to the operator.
+- The sign-off's verdict line (APPROVED / CHANGES REQUESTED) is **computed in
+  code**; the model writes the rest.
 - Every role leaves a handoff note, and routing decisions go into a decision log.
 
 ```powershell

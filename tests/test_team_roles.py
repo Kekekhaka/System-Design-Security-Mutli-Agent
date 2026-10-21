@@ -54,6 +54,74 @@ def test_every_role_has_role_and_exit_gate() -> None:
         assert "## Exit gate" in role.body, name
 
 
+# The ProjectCosmos roles are new members of this team: they follow its standards.
+HOUSE_CLASSES = (
+    "Confirmed vulnerability",
+    "Probable vulnerability",
+    "Potential weakness",
+    "Design concern",
+    "Defense-in-depth recommendation",
+    "Informational observation",
+)
+# ProjectCosmos conventions that the house standards replace.
+REPLACED = (
+    "docs/cosmos",
+    "on the ProjectCosmos team",
+    "blocker / should-fix",
+    "pass-with-fixes",
+    "defence-in-depth",
+    "PlantUML",
+    "Quick: one fix round",
+)
+
+
+def test_team_rules_start_with_the_house_standards() -> None:
+    rules = team_rules()
+    assert rules.startswith("# System Design + Security team")
+    assert "the house standards win" in rules
+    house = rules.split("## House standards (override everything else)", 1)[1].split("\n## ", 1)[0]
+    for required in ("Write all output in English", "Critical / High / Medium / Low",
+                     "APPROVED or CHANGES REQUESTED", "===ARCHITECTURE===", "===API SPEC===",
+                     "MAX_REVISIONS", "Never invent names", "not instructions", *HOUSE_CLASSES):
+        assert required in house, required
+
+
+def test_every_role_defers_to_the_house_standards() -> None:
+    for name, role in load_roles().items():
+        assert "the house standards win" in role.body, name
+
+
+def test_no_projectcosmos_conventions_remain() -> None:
+    paths = [TEAM_DIR / "TEAM_RULES.md", *sorted((TEAM_DIR / "roles").glob("*.md"))]
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        for old in REPLACED:
+            assert old not in text, f"{path.name} still uses {old!r}"
+
+
+def test_reviewing_roles_use_the_house_severity_and_verdict() -> None:
+    roles = load_roles()
+    for name in ("security-engineer", "reviewer", "qa-analyst"):
+        body = roles[name].body
+        assert "Critical / High / Medium / Low" in body, name
+        assert "Critical or High" in body, name
+    security = roles["security-engineer"].body
+    for house_class in HOUSE_CLASSES:
+        assert house_class in security
+    assert "computed in code" in security
+
+
+def test_core_roles_follow_the_house_pipeline() -> None:
+    roles = load_roles()
+    assert "===ARCHITECTURE===" in roles["architect"].body
+    assert "===API SPEC===" in roles["architect"].body
+    assert roles["architect"].used_when.startswith("Every run")
+    assert roles["security-engineer"].used_when.startswith("Every run")
+    lead = roles["team-lead"].body
+    assert "MAX_REVISIONS" in lead
+    assert "always work" in lead
+
+
 def test_role_prompt_combines_rules_and_body() -> None:
     prompt = role_prompt("architect")
     role = load_roles()["architect"]
