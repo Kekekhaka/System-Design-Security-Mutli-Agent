@@ -1,4 +1,9 @@
-# System Design + Security Multi-Agent
+# Lekgotla
+
+*Lekgotla* (Sesotho, Setswana and Sepedi) is a council of experts who meet to decide
+something. This is the System Design + Security multi-agent: a team of nine experts that
+designs a system, audits it for security, and, on request, builds, tests and reviews it.
+
 
 A LangGraph loop where a **Designer** agent produces a system design (following a
 senior-engineer 6-step framework) and an **AppSec** agent audits it. Rejected
@@ -129,6 +134,16 @@ With `--build --repo <path>`, an APPROVED design is built:
   with, and the tests run without writing bytecode. Tool caches never count as
   changes.
 - Each opencode run's output is saved next to its brief (`briefs/*.log`).
+- **The code audit is scoped to the diff.** For an existing system the design document
+  can be older than the code, and an unscoped audit re-reports every known weakness on
+  every change (a header layout change was once sent back for authentication). The
+  audit is told to report only what the diff introduces or worsens. Keep the design
+  documents you pass in current anyway.
+- **A stalled model call does not end the run.** Every model stage is run again once
+  after a timeout (and logged in the decisions). Team runs cap a single call at
+  `TEAM_CALL_TIMEOUT_SECONDS` (600, instead of the shared 1200), so a stall costs at
+  most one such wait. A second timeout still stops the run, with everything finished so
+  far saved in the run folder.
 - The pipeline runs `TEAM_TEST_COMMAND` in the worktree and records the real
   result; QA's opinion is not the gate.
 - QA may only change test files: the pipeline compares file contents before and
@@ -150,7 +165,7 @@ python scripts/run_team.py --brief-file brief.md --build --repo C:/path/to/repo
 Settings (in `.env`): `OPENCODE_BIN`, `OPENCODE_MODEL`, `ENGINEER_TIMEOUT_SECONDS`
 (default 1800), `TEAM_TEST_COMMAND` (default `python -m pytest -q`),
 `TEAM_TEST_TIMEOUT_SECONDS` (900), `BUILD_DIFF_MAX_CHARS` (60000) and
-`TEAM_WORKTREE_ROOT`.
+`TEAM_WORKTREE_ROOT` and `TEAM_CALL_TIMEOUT_SECONDS` (600).
 
 The script prints each step as it finishes and saves the artifacts after every
 step, so a crash or timeout keeps the finished work. Artifacts go to

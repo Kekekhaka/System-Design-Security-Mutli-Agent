@@ -78,7 +78,7 @@ REPLACED = (
 
 def test_team_rules_start_with_the_house_standards() -> None:
     rules = team_rules()
-    assert rules.startswith("# System Design + Security team")
+    assert rules.startswith("# Lekgotla: rules every role follows")
     assert "the house standards win" in rules
     house = rules.split("## House standards (override everything else)", 1)[1].split("\n## ", 1)[0]
     for required in ("Write all output in English", "Critical / High / Medium / Low",

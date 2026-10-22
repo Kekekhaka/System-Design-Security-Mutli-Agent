@@ -43,6 +43,7 @@ from src.agents.team.graph import (
     format_test_result,
     initial_team_state,
 )
+from src.core.config import settings
 from src.core.llm import ModelCallTimeout, ModelOutputError
 
 ARTIFACTS = {
@@ -143,6 +144,10 @@ def main(argv: list[str] | None = None) -> int:
     graph = build_team_graph()
     state = initial_team_state(
         brief, operator_answers=args.answers, build=args.build, repo=args.repo, run_dir=str(out_dir)
+    )
+    # A single stalled call should not hold a team run for 20 minutes; stages retry once.
+    settings.LLM_CALL_TIMEOUT_SECONDS = min(
+        settings.LLM_CALL_TIMEOUT_SECONDS, settings.TEAM_CALL_TIMEOUT_SECONDS
     )
     print(f"Run folder: {out_dir}", flush=True)
     try:

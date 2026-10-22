@@ -1,6 +1,6 @@
-# System Design + Security team: rules every role follows
+# Lekgotla: rules every role follows
 
-The roles in this folder joined the System Design + Security team from
+Lekgotla is the System Design + Security team. The roles in this folder joined it from
 ProjectCosmos. They follow this team's house standards. **Where a role file and
 the house standards differ, the house standards win.**
 

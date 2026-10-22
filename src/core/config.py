@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # Verify TLS with the OS certificate store (works behind corporate proxies).
     USE_OS_TRUST_STORE: bool = True
     APP_BASE_URL: str = "http://localhost:8000"
-    APP_TITLE: str = "System Design & AppSec Agent"
+    APP_TITLE: str = "Lekgotla"
 
     # "production" refuses to start with dev-only settings (see main.lifespan).
     APP_ENV: str = "development"
@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     TEAM_TEST_TIMEOUT_SECONDS: int = 900
     # The diff reviewers see; longer diffs are cut with a note saying so.
     BUILD_DIFF_MAX_CHARS: int = 60000
+    # Team runs: the longest a single model call may take (the shared default is 1200 s).
+    # Real stages take 1-5 minutes; a call that stalls for 20 minutes only wastes the run,
+    # and the team graph retries a stage once after a timeout (see run_team.py).
+    TEAM_CALL_TIMEOUT_SECONDS: int = 600
     # Where build worktrees go. Must be outside every git repository (checked):
     # nested in one, opencode adopts that repository as its workspace.
     # Empty = <system temp>/team-worktrees.

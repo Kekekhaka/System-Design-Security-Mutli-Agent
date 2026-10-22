@@ -294,3 +294,89 @@ def test_each_opencode_run_saves_its_output_next_to_its_brief(tmp_path):
         "opencode output for backend-engineer round 1"
     )
     assert (briefs / "round-1-qa-analyst.log").exists()
+
+
+def test_a_stalled_stage_is_run_again_once_and_logged(tmp_path):
+    from src.agents.team.graph import retry_once_on_timeout
+    from src.core.llm import ModelCallTimeout
+
+    calls = []
+
+    def flaky(state):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ModelCallTimeout("stalled")
+        return {"decisions": ["did the work"], "model_calls": 3}
+
+    update = retry_once_on_timeout("code_audit", flaky)({})
+
+    assert len(calls) == 2
+    assert update["model_calls"] == 3
+    assert "code_audit: a model call timed out; the stage was run again and finished." in update["decisions"]
+
+
+def test_a_second_timeout_is_not_swallowed():
+    import pytest
+
+    from src.agents.team.graph import retry_once_on_timeout
+    from src.core.llm import ModelCallTimeout
+
+    def always_stalls(state):
+        raise ModelCallTimeout("stalled")
+
+    with pytest.raises(ModelCallTimeout):
+        retry_once_on_timeout("reviewer", always_stalls)({})
+
+
+def test_every_model_stage_is_wrapped_and_workspace_stages_are_not(tmp_path):
+    from src.agents.team.graph import MODEL_STAGES
+
+    assert {"reviewer", "code_audit", "security_engineer", "designer", "team_lead_sign_off"} <= set(MODEL_STAGES)
+    # opencode and test runs are not model calls; retrying them would repeat real work
+    assert not {"backend_engineer", "frontend_engineer", "qa_analyst", "test_run", "build_workspace"} & set(MODEL_STAGES)
+
+
+def test_the_code_audit_is_scoped_to_the_diff(tmp_path):
+    responses = [plan_json(staff=BUILD_STAFF), PACK, DESIGN_V1, *APPROVE_ROUND, REVIEW_OK, *CODE_OK, DOCS, SIGN_OFF]
+    _, llm, _ = run_build(tmp_path, responses)
+
+    code_scope_prompt = llm.calls[7][1].content
+    assert "SCOPE OF THIS AUDIT: audit ONLY the changes in the diff" in code_scope_prompt
+    assert "out of scope" in code_scope_prompt
+    # the design audit (call 3) is the whole-design review and is not scoped to a diff
+    assert "SCOPE OF THIS AUDIT" not in llm.calls[3][1].content
+
+
+class StallOnceLLM(ScriptedLLM):
+    """Raises a model-call timeout the first time call number `stall_at` is made."""
+
+    def __init__(self, responses, stall_at):
+        super().__init__(responses)
+        self.stall_at = stall_at
+        self.stalled = False
+
+    def invoke(self, messages, **kwargs):
+        if not self.stalled and len(self.calls) == self.stall_at:
+            self.stalled = True
+            from src.core.llm import ModelCallTimeout
+
+            raise ModelCallTimeout("The reviewer stage did not finish within the deadline.")
+        return super().invoke(messages, **kwargs)
+
+
+def test_a_model_call_that_stalls_mid_build_does_not_end_the_run(tmp_path):
+    # Seen live: the code audit's first call hung for 20 minutes and killed a finished build.
+    # Call 6 is the reviewer (plan, BA, designer, three audit calls, then the reviewer).
+    responses = [plan_json(staff=BUILD_STAFF), PACK, DESIGN_V1, *APPROVE_ROUND, REVIEW_OK, *CODE_OK, DOCS, SIGN_OFF]
+    llm = StallOnceLLM(responses, stall_at=6)
+    ws = FakeWorkspace()
+    graph = build_team_graph(llm=llm, workspace=ws)
+    state = initial_team_state(
+        "Build a card payment API.", build=True, repo=str(tmp_path / "repo"), run_dir=str(tmp_path / "run")
+    )
+
+    result = graph.invoke(state, config=RUN_CONFIG)
+
+    assert llm.stalled
+    assert result["status"] == "approved" and result["build_status"] == "passed"
+    assert "reviewer: a model call timed out; the stage was run again and finished." in result["decisions"]

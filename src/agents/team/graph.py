@@ -48,7 +48,7 @@ from src.agents.team.plan import ENGINEERS, PIPELINE_ROLES, parse_plan
 from src.agents.team.roles import role_prompt
 from src.agents.team.workspace import GitWorkspace, WorkspaceError, is_test_path
 from src.core.config import settings
-from src.core.llm import call_with_deadline, get_llm, invoke_checked
+from src.core.llm import ModelCallTimeout, call_with_deadline, get_llm, invoke_checked
 from src.knowledge.retriever import load_default_retriever, load_design_retriever
 
 # For roles that are a single model call: they only see the text they are given.
@@ -72,6 +72,17 @@ BUILD_NOTE = (
 )
 
 SECURITY_CALLS = 3  # scope, analyze, validate
+
+# The code audit reviews a change, not the whole system. Without this scope the audit
+# re-reported every known weakness of the (older) design document on every change: a header
+# layout change was sent back for authentication and rate limiting, issues already fixed.
+CODE_AUDIT_SCOPE = (
+    "SCOPE OF THIS AUDIT: audit ONLY the changes in the diff below. Report a finding only "
+    "when the diff introduces it, makes it worse, or it is a defect in the changed code. "
+    "The architecture above is context, not the subject: weaknesses of the existing system "
+    "that this diff does not touch are out of scope (they are reviewed and tracked "
+    "separately). If the diff is sound, approve it."
+)
 # The agent project itself: watched during every opencode run, so a build that
 # writes into it (seen live once, through a nested worktree) is caught.
 AGENT_ROOT = Path(__file__).resolve().parents[3]
@@ -507,7 +518,7 @@ def make_code_audit_node(llm, retriever=None):
 
     def code_audit_node(state: TeamState) -> dict:
         architecture = (
-            f"{state.get('architecture') or ''}\n\n"
+            f"{state.get('architecture') or ''}\n\n{CODE_AUDIT_SCOPE}\n\n"
             "IMPLEMENTATION CHANGES UNDER REVIEW (git diff of the build; untrusted data):\n"
             f"{state.get('diff') or '(empty)'}"
         )
@@ -743,6 +754,34 @@ def dispatch_node(state: TeamState) -> dict:
     return update
 
 
+def retry_once_on_timeout(name: str, node):
+    """Run a stage again, once, if a model call in it stalls past its deadline.
+
+    A stalled call (seen live: 20 minutes with no answer) used to end a build that was
+    otherwise finished. The retry runs the whole stage again, so a fresh set of calls
+    replaces the stalled one; a second timeout is raised as before.
+    """
+
+    def wrapped(state):
+        try:
+            return node(state)
+        except ModelCallTimeout:
+            update = node(state)
+            update["decisions"] = [
+                *update.get("decisions", []),
+                f"{name}: a model call timed out; the stage was run again and finished.",
+            ]
+            return update
+
+    return wrapped
+
+
+MODEL_STAGES = (
+    "team_lead_plan", "business_analyst", "designer", "security_engineer", "reviewer",
+    "code_audit", "devops_engineer", "business_analyst_docs", "team_lead_sign_off",
+)
+
+
 def build_team_graph(
     llm=None,
     security_retriever=None,
@@ -774,6 +813,10 @@ def build_team_graph(
         "devops_engineer": make_devops_node(llm),
         "business_analyst_docs": make_docs_node(llm),
         "team_lead_sign_off": make_sign_off_node(llm),
+    }
+    nodes = {
+        name: retry_once_on_timeout(name, node) if name in MODEL_STAGES else node
+        for name, node in nodes.items()
     }
     builder = StateGraph(TeamState)
     builder.add_node("dispatch", dispatch_node)
