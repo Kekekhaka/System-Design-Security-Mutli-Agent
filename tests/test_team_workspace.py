@@ -222,3 +222,15 @@ def test_pwd_always_names_the_directory_the_command_runs_in(tmp_path: Path, monk
 
     assert seen["env"]["PWD"] == str(target.resolve())
     assert "OLDPWD" not in seen["env"]
+
+
+def test_commands_get_no_stdin(tmp_path: Path):
+    # opencode stops at start-up when it inherits a stdin pipe that never closes.
+    seen = {}
+
+    def runner(command, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    workspace(tmp_path / "wt", runner=runner).run_tests(tmp_path)
+    assert seen["stdin"] is subprocess.DEVNULL

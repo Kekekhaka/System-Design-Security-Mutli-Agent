@@ -156,6 +156,8 @@ class GitWorkspace:
                 command,
                 cwd=str(cwd),
                 env=self._env(cwd),
+                # opencode reads piped stdin and stops at start-up if it never closes.
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
