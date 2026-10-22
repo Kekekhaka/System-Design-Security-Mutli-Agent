@@ -490,7 +490,9 @@ def make_reviewer_node(llm):
             HumanMessage(
                 content=(
                     "Review the code changes below. Submit your report as structured data: "
-                    "a short summary and every finding in the house format.\n\n"
+                    "a short summary and every finding in the house format. Severity must be "
+                    "exactly Critical, High, Medium or Low; report a purely informational "
+                    "note as Low.\n\n"
                     f"Requirements pack:\n{state.get('requirements_pack') or '(none)'}\n\n"
                     f"API spec (the contract):\n{state.get('api_spec') or ''}\n\n"
                     f"Test run:\n{format_test_result(state.get('test_result'))}\n\n"
@@ -500,6 +502,13 @@ def make_reviewer_node(llm):
             ),
         ]
         output = call_with_deadline(lambda: reviewer.invoke(messages), "reviewer")
+        if not isinstance(output.get("parsed"), SecurityReport) and output.get("parsing_error"):
+            # One retry that shows the model its own formatting error, so a bad severity
+            # label does not cost a whole build round.
+            retry = [*messages, HumanMessage(content=(
+                f"Your report could not be read: {output.get('parsing_error')}. "
+                "Submit it again; severity must be exactly Critical, High, Medium or Low."))]
+            output = call_with_deadline(lambda: reviewer.invoke(retry), "reviewer")
         report = output.get("parsed")
         if isinstance(report, SecurityReport):
             findings = render_report(report, reject_reason=inconsistency(report))

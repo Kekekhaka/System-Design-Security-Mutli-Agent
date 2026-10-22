@@ -380,3 +380,28 @@ def test_a_model_call_that_stalls_mid_build_does_not_end_the_run(tmp_path):
     assert llm.stalled
     assert result["status"] == "approved" and result["build_status"] == "passed"
     assert "reviewer: a model call timed out; the stage was run again and finished." in result["decisions"]
+
+
+def test_reviewer_retries_once_when_its_report_cannot_be_parsed():
+    from types import SimpleNamespace
+
+    from src.agents.security.report import SecurityReport
+    from src.agents.team.graph import make_reviewer_node
+
+    class Structured:
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, messages):
+            self.calls.append(messages)
+            if len(self.calls) == 1:
+                return {"parsed": None, "raw": SimpleNamespace(content="x"),
+                        "parsing_error": "severity 'Informational' is not valid"}
+            return {"parsed": SecurityReport(summary="Fine.", findings=[], finding_count=0), "raw": None, "parsing_error": None}
+
+    structured = Structured()
+    llm = SimpleNamespace(with_structured_output=lambda *a, **k: structured)
+    update = make_reviewer_node(llm)({"build_round": 1})
+    assert len(structured.calls) == 2
+    assert "Informational" in structured.calls[1][-1].content
+    assert update["handoffs"][0]["note"].endswith("APPROVED")
