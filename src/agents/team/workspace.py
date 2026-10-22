@@ -136,9 +136,18 @@ class GitWorkspace:
             runner=runner,
         )
 
-    def _env(self) -> dict[str, str]:
+    def _env(self, cwd: Path | None = None) -> dict[str, str]:
         env = safe_env()
         env["PYTHONDONTWRITEBYTECODE"] = "1"  # keep bytecode out of the build's changes
+        # subprocess changes the real working directory but keeps the parent's PWD,
+        # and opencode trusts PWD over its real cwd (reproduced: with PWD pointing at
+        # the agent project, opencode wrote there although it was started in the
+        # worktree). So PWD always names the directory the command runs in.
+        env.pop("OLDPWD", None)
+        if cwd is not None:
+            env["PWD"] = str(Path(cwd).resolve())
+        else:
+            env.pop("PWD", None)
         return env
 
     def _run(self, command: list[str] | str, cwd: Path, timeout: int | None = 120) -> CommandResult:
@@ -146,7 +155,7 @@ class GitWorkspace:
             completed = self.runner(
                 command,
                 cwd=str(cwd),
-                env=self._env(),
+                env=self._env(cwd),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -168,7 +177,7 @@ class GitWorkspace:
         """The complete stdout of a git command (not a tail), or "" on failure."""
         try:
             completed = self.runner(
-                ["git", *git_args], cwd=str(cwd), env=self._env(), capture_output=True,
+                ["git", *git_args], cwd=str(cwd), env=self._env(cwd), capture_output=True,
                 text=True, encoding="utf-8", errors="replace", timeout=120,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError):

@@ -201,3 +201,24 @@ def test_commands_run_without_writing_bytecode(tmp_path: Path):
 
     workspace(tmp_path / "wt", runner=runner).run_tests(tmp_path)
     assert seen["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
+def test_pwd_always_names_the_directory_the_command_runs_in(tmp_path: Path, monkeypatch):
+    # Reproduced live: subprocess keeps the parent's PWD, opencode trusts PWD, and
+    # with PWD pointing at the agent project it wrote there instead of the worktree.
+    monkeypatch.setenv("PWD", "C:/somewhere/else")
+    monkeypatch.setenv("OLDPWD", "C:/older")
+    seen = {}
+
+    def runner(command, **kwargs):
+        seen.update(env=kwargs["env"], cwd=kwargs["cwd"])
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    target = tmp_path / "worktree"
+    target.mkdir()
+    brief = tmp_path / "brief.md"
+    brief.write_text("x", encoding="utf-8")
+    workspace(tmp_path / "wt", runner=runner).run_opencode(target, brief, "t")
+
+    assert seen["env"]["PWD"] == str(target.resolve())
+    assert "OLDPWD" not in seen["env"]
