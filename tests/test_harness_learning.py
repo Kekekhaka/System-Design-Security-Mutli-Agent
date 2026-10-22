@@ -410,7 +410,7 @@ def test_dry_run_prints_call_count_and_makes_no_call(tmp_path, monkeypatch, caps
     monkeypatch.setattr(settings, "HARNESS_CANDIDATES", 2)
     monkeypatch.setattr(settings, "MAX_REVISIONS", 2)
     monkeypatch.setattr(settings, "HARNESS_MAX_REVISIONS", 0)
-    monkeypatch.setattr(settings, "HARNESS_SANITY_FIXTURES", 2)
+    monkeypatch.setattr(settings, "HARNESS_SANITY_FIXTURES", 1)
 
     def explode(*args, **kwargs):
         raise AssertionError("dry-run must not build an LLM")
@@ -418,7 +418,7 @@ def test_dry_run_prints_call_count_and_makes_no_call(tmp_path, monkeypatch, caps
     monkeypatch.setattr(run_harness, "get_llm", explode)
     assert run_harness.main(["--brief", "a task", "--dry-run", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["model_calls"] == 17
+    assert payload["model_calls"] == 16
     assert payload["settings"]["reasoning_effort"] == "none"
     assert not (tmp_path / "personas.json").exists()
 

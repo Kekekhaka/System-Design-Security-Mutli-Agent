@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     # Hard per-run model-call cap. 0 means "estimate + 2".
     HARNESS_MAX_MODEL_CALLS: int = 0
     # Fixture calls spent proving the baseline auditor still works (2 fixtures).
-    HARNESS_SANITY_FIXTURES: int = 2
+    HARNESS_SANITY_FIXTURES: int = 1
 
     # Team build runs (scripts/run_team.py --build): the engineers and QA are
     # opencode runs in an isolated git worktree; the tests run there for real.

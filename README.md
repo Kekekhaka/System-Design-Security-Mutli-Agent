@@ -304,7 +304,7 @@ off, behaviour is exactly as before.
 | `HARNESS_USE_CHAMPION` | `false` | Use the champion in the team audits |
 | `HARNESS_HMAC_KEY` | empty | HMAC key for store/history integrity |
 | `HARNESS_MAX_MODEL_CALLS` | `0` (estimate + 2) | Hard per-run call budget |
-| `HARNESS_SANITY_FIXTURES` | `2` | Baseline sanity checks before a run |
+| `HARNESS_SANITY_FIXTURES` | `1` | Baseline sanity checks before a run |
 
 ## Evaluation
 

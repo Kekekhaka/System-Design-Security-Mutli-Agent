@@ -766,7 +766,7 @@ def test_ac08_dry_run_prints_the_call_count_and_makes_no_call(
     monkeypatch.setattr(settings, "HARNESS_CANDIDATES", 2)
     monkeypatch.setattr(settings, "HARNESS_MAX_REVISIONS", 0)
     monkeypatch.setattr(settings, "MAX_REVISIONS", 2)
-    monkeypatch.setattr(settings, "HARNESS_SANITY_FIXTURES", 2)
+    monkeypatch.setattr(settings, "HARNESS_SANITY_FIXTURES", 1)
     monkeypatch.setattr(
         run_harness,
         "get_llm",
@@ -775,7 +775,7 @@ def test_ac08_dry_run_prints_the_call_count_and_makes_no_call(
 
     assert run_harness.main(["--brief", "a task", "--dry-run", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["model_calls"] == 17
+    assert payload["model_calls"] == 16
     assert not (tmp_path / "personas.json").exists()
     assert not (tmp_path / "history.jsonl").exists()
 

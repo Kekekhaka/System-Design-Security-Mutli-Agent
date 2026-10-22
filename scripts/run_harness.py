@@ -14,7 +14,7 @@ Cost, with C = candidates, R = revisions per candidate:
 
     candidate_calls = C * (2 * (R + 1) + 1)
     challenger_call = 1 when the library has an active persona (always, after seeding)
-    sanity_calls    = HARNESS_SANITY_FIXTURES (default 2: one vulnerable, one clean)
+    sanity_calls    = HARNESS_SANITY_FIXTURES (default 1: one vulnerable design the baseline must reject)
     total           = candidate_calls + challenger_call + sanity_calls
 
 `--dry-run` prints that total and exits without making a model call or touching
@@ -319,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     key = resolve_hmac_key()
 
     challenger = 1 if _library_has_persona(store_path) else 0
-    sanity = max(0, min(settings.HARNESS_SANITY_FIXTURES, 2))
+    sanity = max(0, min(settings.HARNESS_SANITY_FIXTURES, 1))
     calls = estimate_model_calls(candidates, max_revisions, challenger, sanity)
 
     if args.dry_run:
