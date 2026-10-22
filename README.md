@@ -117,9 +117,18 @@ With `--build --repo <path>`, an APPROVED design is built:
   `opencode/deepseek-v4.1-flash-free`) in a **git worktree** of the repository on
   a new branch `team/<run id>`. The operator's checkout is never touched, and
   untracked files such as `.env` are not in a worktree.
+- Worktrees live under `TEAM_WORKTREE_ROOT` (default: `<system temp>/team-worktrees`),
+  which must be **outside every git repository**; the run refuses to start
+  otherwise. Nested inside a repository, opencode adopts that repository as its
+  workspace (seen in testing: the engineer wrote into this project).
+- **Isolation guard:** around every opencode run, the target repository and this
+  project are checked with `git status`. A write outside the worktree stops the
+  build at once and is reported; it never loops.
 - Variables that look like secrets (keys, tokens, passwords, `OPENROUTER_*`,
   `LLM_*` and so on) are removed from the environment opencode and the tests run
-  with.
+  with, and the tests run without writing bytecode. Tool caches never count as
+  changes.
+- Each opencode run's output is saved next to its brief (`briefs/*.log`).
 - The pipeline runs `TEAM_TEST_COMMAND` in the worktree and records the real
   result; QA's opinion is not the gate.
 - QA may only change test files: the pipeline compares file contents before and
@@ -140,10 +149,13 @@ python scripts/run_team.py --brief-file brief.md --build --repo C:/path/to/repo
 
 Settings (in `.env`): `OPENCODE_BIN`, `OPENCODE_MODEL`, `ENGINEER_TIMEOUT_SECONDS`
 (default 1800), `TEAM_TEST_COMMAND` (default `python -m pytest -q`),
-`TEAM_TEST_TIMEOUT_SECONDS` (900) and `BUILD_DIFF_MAX_CHARS` (60000).
+`TEAM_TEST_TIMEOUT_SECONDS` (900), `BUILD_DIFF_MAX_CHARS` (60000) and
+`TEAM_WORKTREE_ROOT`.
 
-Artifacts go to `runs/<timestamp>/` (gitignored). Exit codes: 0 approved,
-1 could not run, 2 escalated, 3 the team lead needs answers.
+The script prints each step as it finishes and saves the artifacts after every
+step, so a crash or timeout keeps the finished work. Artifacts go to
+`runs/<timestamp>/` (gitignored). Exit codes: 0 approved, 1 could not run,
+2 escalated, 3 the team lead needs answers.
 
 ## Setup
 

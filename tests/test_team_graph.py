@@ -4,6 +4,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 from src.agents.team.graph import (
     PIPELINE_NOTE,
     RUN_CONFIG,
@@ -14,6 +16,7 @@ from src.agents.team.graph import (
 from src.agents.team.plan import parse_plan
 from src.agents.team.roles import load_roles
 from src.core.config import settings
+from src.core.llm import ModelOutputError
 from tests.fakes import ScriptedLLM
 
 DESIGN_V1 = "===ARCHITECTURE===\nArchitecture v1: raw card numbers reach the backend.\n===API SPEC===\nPOST /pay {card_number}"
@@ -182,3 +185,34 @@ def test_write_run_writes_artifacts_and_log(tmp_path: Path):
     assert not written & {"TEST_REPORT.md", "REVIEW_REPORT.md", "code-security-report.md", "changes.diff"}
     log = json.loads((tmp_path / "run" / "team-log.json").read_text(encoding="utf-8"))
     assert log["status"] == "approved" and log["model_calls"] == 7
+
+
+def test_progress_is_printed_per_step_and_matches_a_plain_run(tmp_path: Path):
+    responses = [plan_json(), PACK, DESIGN_V1, *APPROVE_ROUND, SIGN_OFF]
+    expected, _ = run(responses)
+    lines = []
+
+    graph = build_team_graph(llm=ScriptedLLM(responses))
+    state = initial_team_state("Design a card payment API.")
+    result = load_run_team().run_with_progress(graph, state, tmp_path / "out", printer=lambda line, **_: lines.append(line))
+
+    steps = [line.split("] ", 1)[1].split(":", 1)[0] for line in lines]
+    assert steps == ["team_lead_plan", "business_analyst", "designer", "security_engineer", "team_lead_sign_off"]
+    for key in ("status", "sign_off", "architecture", "requirements_pack", "revision_count", "model_calls"):
+        assert result[key] == expected[key], key
+    assert result["handoffs"] == expected["handoffs"]
+    assert result["decisions"] == expected["decisions"]
+
+
+def test_a_crash_keeps_everything_finished_so_far(tmp_path: Path):
+    # The sign-off returns empty output every time: invoke_checked gives up and raises.
+    responses = [plan_json(), PACK, DESIGN_V1, *APPROVE_ROUND, ""]
+    graph = build_team_graph(llm=ScriptedLLM(responses))
+    out = tmp_path / "out"
+
+    with pytest.raises(ModelOutputError, match="sign-off"):
+        load_run_team().run_with_progress(graph, initial_team_state("Design it."), out, printer=lambda *a, **k: None)
+
+    for name in ("REQUIREMENTS_PACK.md", "architecture.md", "api-spec.md", "security-report.md", "team-log.json"):
+        assert (out / name).exists(), name
+    assert not (out / "SIGN_OFF.md").exists()

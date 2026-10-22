@@ -31,6 +31,7 @@ Exit codes: 0 approved, 1 could not run, 2 escalated (CHANGES REQUESTED),
 import argparse
 import json
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -57,6 +58,8 @@ ARTIFACTS = {
     "sign_off": "SIGN_OFF.md",
 }
 EXIT_CODES = {"approved": 0, "escalated": 2, "needs_operator": 3}
+# State keys the graph appends to (operator.add reducers); every other key is replaced.
+APPENDED = ("handoffs", "decisions")
 
 
 def _write(path: Path, text: str) -> Path:
@@ -96,6 +99,26 @@ def write_run(result: dict, out_dir: Path) -> list[Path]:
     return written
 
 
+def run_with_progress(graph, state: dict, out_dir: Path, printer=print) -> dict:
+    """Run the graph, printing each step as it finishes and saving the artifacts after
+    every step, so a crash or timeout never loses finished work."""
+    full = dict(state)
+    started = time.monotonic()
+    for update in graph.stream(state, config=RUN_CONFIG, stream_mode="updates"):
+        for node, delta in update.items():
+            if not delta:
+                continue
+            for key, value in delta.items():
+                full[key] = [*full.get(key, []), *value] if key in APPENDED else value
+            if node == "dispatch":
+                continue
+            handoffs = delta.get("handoffs") or [{}]
+            note = handoffs[-1].get("note", "") or ", ".join(delta.get("decisions", []))
+            printer(f"[{time.monotonic() - started:6.0f}s] {node}: {note}"[:200], flush=True)
+            write_run(full, out_dir)
+    return full
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the team pipeline on a brief.")
     parser.add_argument("brief", nargs="?", help="The brief as text")
@@ -121,13 +144,13 @@ def main(argv: list[str] | None = None) -> int:
     state = initial_team_state(
         brief, operator_answers=args.answers, build=args.build, repo=args.repo, run_dir=str(out_dir)
     )
+    print(f"Run folder: {out_dir}", flush=True)
     try:
-        result = graph.invoke(state, config=RUN_CONFIG)
+        result = run_with_progress(graph, state, out_dir)
     except (ModelOutputError, ModelCallTimeout) as exc:
-        print(f"Run failed: {exc}", file=sys.stderr)
+        print(f"Run failed: {exc}. Everything finished so far is in {out_dir}", file=sys.stderr)
         return 1
 
-    write_run(result, out_dir)
     status = result.get("status", "")
     print(f"Status: {status}  (model calls: {result.get('model_calls', 0)}, "
           f"opencode runs: {result.get('opencode_runs', 0)})")

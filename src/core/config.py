@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     TEAM_TEST_TIMEOUT_SECONDS: int = 900
     # The diff reviewers see; longer diffs are cut with a note saying so.
     BUILD_DIFF_MAX_CHARS: int = 60000
+    # Where build worktrees go. Must be outside every git repository (checked):
+    # nested in one, opencode adopts that repository as its workspace.
+    # Empty = <system temp>/team-worktrees.
+    TEAM_WORKTREE_ROOT: str = ""
 
     SECURITY_RAG_ENABLED: bool = True
     SECURITY_RAG_TOP_K: int = 3

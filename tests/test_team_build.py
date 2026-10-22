@@ -35,32 +35,43 @@ FAILED = CommandResult(1, "FAILED tests/test_qa.py::test_pay_validates_amount - 
 
 
 class FakeWorkspace:
-    def __init__(self, tests=None, qa_edits_product=False, fail_create=None):
+    def __init__(self, tests=None, qa_edits_product=False, qa_reverts_product=False,
+                 escape_on=None, fail_create=None):
         self.tests = list(tests or [PASSED])
         self.test_calls = 0
         self.runs: list[tuple[str, str]] = []
         self.files: dict[str, str] = {}
         self.qa_edits_product = qa_edits_product
+        self.qa_reverts_product = qa_reverts_product
+        self.escape_on = escape_on  # a run title prefix that writes outside the worktree
+        self.outside: list[str] = []
         self.fail_create = fail_create
         self.created = []
 
-    def create(self, repo, run_dir, run_id):
+    def create(self, repo, run_id):
         if self.fail_create:
             raise WorkspaceError(self.fail_create)
-        path = Path(run_dir) / "worktree"
+        path = Path(repo).parent / "worktrees" / run_id
         path.mkdir(parents=True, exist_ok=True)
         self.created.append(path)
         return path, f"team/{run_id}"
 
     def run_opencode(self, worktree, brief, title):
         self.runs.append((title, Path(brief).read_text(encoding="utf-8")))
+        if self.escape_on and title.startswith(self.escape_on):
+            self.outside.append("?? src/text_utils.py")
         if title.startswith("qa-analyst"):
             self.files["tests/test_qa.py"] = f"v{len(self.runs)}"
             if self.qa_edits_product:
                 self.files["app.py"] = f"qa{len(self.runs)}"
+            if self.qa_reverts_product:
+                self.files.pop("app.py", None)  # back to HEAD: no longer a change
         else:
             self.files["app.py"] = f"eng{len(self.runs)}"
-        return CommandResult(0, "done")
+        return CommandResult(0, f"opencode output for {title}")
+
+    def watch(self, repos):
+        return {str(repo): "\n".join(self.outside) for repo in repos}
 
     def snapshot(self, worktree):
         return dict(self.files)
@@ -245,3 +256,41 @@ def test_write_run_writes_the_build_artifacts(tmp_path):
     assert log["build"]["status"] == "passed" and log["build"]["branch"] == "team/run"
     assert log["opencode_runs"] == 2
     assert "PASSED" in (tmp_path / "out" / "TEST_REPORT.md").read_text(encoding="utf-8")
+
+
+def test_a_write_outside_the_worktree_stops_the_build_at_once(tmp_path):
+    # Seen live: a nested worktree let the engineer write into the agent project.
+    responses = [plan_json(staff=BUILD_STAFF), PACK, DESIGN_V1, *APPROVE_ROUND, SIGN_OFF]
+    ws = FakeWorkspace(escape_on="backend-engineer")
+    result, _, _ = run_build(tmp_path, responses, workspace=ws)
+
+    assert result["status"] == "escalated"
+    assert result["build_status"] == "failed"
+    assert titles(ws) == ["backend-engineer round 1"], "no QA, review or second round after a breach"
+    assert any("src/text_utils.py" in v for v in result["isolation_violations"])
+    assert "isolation" in result["sign_off"].splitlines()[0]
+    assert any("wrote outside the build worktree" in d for d in result["decisions"])
+    # Stopped in the round it happened, not counted up to the revision limit.
+    assert result["build_round"] == 1
+    assert any(d.startswith("Build stopped: a role wrote outside the worktree") for d in result["decisions"])
+
+
+def test_qa_reverting_product_code_fails_the_gate(tmp_path, monkeypatch):
+    # The engineer's app.py change disappears during QA's run: still a QA violation.
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 1)
+    responses = [plan_json(staff=BUILD_STAFF), PACK, DESIGN_V1, *APPROVE_ROUND, REVIEW_OK, *CODE_OK, SIGN_OFF]
+    result, _, _ = run_build(tmp_path, responses, workspace=FakeWorkspace(qa_reverts_product=True))
+
+    assert result["qa_violations"] == ["app.py"]
+    assert result["status"] == "escalated"
+
+
+def test_each_opencode_run_saves_its_output_next_to_its_brief(tmp_path):
+    responses = [plan_json(staff=BUILD_STAFF), PACK, DESIGN_V1, *APPROVE_ROUND, REVIEW_OK, *CODE_OK, DOCS, SIGN_OFF]
+    run_build(tmp_path, responses)
+
+    briefs = tmp_path / "run" / "briefs"
+    assert (briefs / "round-1-backend-engineer.log").read_text(encoding="utf-8") == (
+        "opencode output for backend-engineer round 1"
+    )
+    assert (briefs / "round-1-qa-analyst.log").exists()

@@ -72,6 +72,9 @@ BUILD_NOTE = (
 )
 
 SECURITY_CALLS = 3  # scope, analyze, validate
+# The agent project itself: watched during every opencode run, so a build that
+# writes into it (seen live once, through a nested worktree) is caught.
+AGENT_ROOT = Path(__file__).resolve().parents[3]
 # LangGraph stops a run after 25 steps by default. Every role step also passes
 # through dispatch, and a build can loop MAX_REVISIONS times, so allow plenty:
 # the real bounds are the house revision limit and the per-call deadlines.
@@ -105,6 +108,7 @@ class TeamState(TypedDict, total=False):
     build_status: str | None  # None | passed | failed | error
     build_error: str | None
     qa_violations: list[str]
+    isolation_violations: list[str]
     test_result: dict | None
     diff: str | None
     changed_files: list[str]
@@ -150,6 +154,7 @@ def initial_team_state(
         "build_status": None,
         "build_error": None,
         "qa_violations": [],
+        "isolation_violations": [],
         "test_result": None,
         "diff": None,
         "changed_files": [],
@@ -213,6 +218,7 @@ def build_gates(state: TeamState) -> dict[str, bool]:
     """The build gates, computed in code."""
     result = state.get("test_result") or {}
     return {
+        "isolation": not state.get("isolation_violations"),
         "tests": result.get("exit_code") == 0 and not result.get("timed_out"),
         "qa_scope": not state.get("qa_violations"),
         "review": is_approved(state.get("review_findings")),
@@ -330,7 +336,7 @@ def make_workspace_node(workspace):
     def workspace_node(state: TeamState) -> dict:
         run_dir = Path(state.get("run_dir") or "runs/team")
         try:
-            worktree, branch = workspace.create(Path(state.get("repo") or "."), run_dir, run_dir.name)
+            worktree, branch = workspace.create(Path(state.get("repo") or "."), run_dir.name)
         except WorkspaceError as exc:
             return {
                 "build_status": "error",
@@ -392,8 +398,12 @@ def make_opencode_node(role: str, workspace):
         brief.write_text(build_brief(role, state), encoding="utf-8")
 
         worktree = Path(state["worktree"])
+        watched = [Path(state.get("repo") or "."), AGENT_ROOT]
+        outside_before = workspace.watch(watched)
         before = workspace.snapshot(worktree) if role == "qa-analyst" else {}
         result = workspace.run_opencode(worktree, brief, f"{role} round {round_}")
+        brief.with_suffix(".log").write_text(result.output, encoding="utf-8")
+        outside_after = workspace.watch(watched)
         update = {
             "round_done": [*state.get("round_done", []), role],
             "opencode_runs": state.get("opencode_runs", 0) + 1,
@@ -410,9 +420,22 @@ def make_opencode_node(role: str, workspace):
             update["decisions"] = [
                 f"{role} (round {round_}) did not finish cleanly; the gates will show what is missing."
             ]
+        escaped = [
+            f"{repo}: {line}"
+            for repo in outside_after
+            for line in sorted(set(outside_after[repo].splitlines()) - set(outside_before[repo].splitlines()))
+        ]
+        if escaped:
+            update["isolation_violations"] = [*state.get("isolation_violations", []), *escaped]
+            update["decisions"] = [
+                *update.get("decisions", []),
+                f"{role} (round {round_}) wrote outside the build worktree; the build is stopped.",
+            ]
         if role == "qa-analyst":
             after = workspace.snapshot(worktree)
-            touched = [p for p in sorted(after) if after[p] != before.get(p)]
+            # Every path seen before or after: a product file QA reverted drops out of
+            # `after`, and must still count.
+            touched = [p for p in sorted(set(before) | set(after)) if after.get(p) != before.get(p)]
             update["qa_violations"] = [p for p in touched if not is_test_path(p)]
         return update
 
@@ -523,6 +546,15 @@ def build_gate_node(state: TeamState) -> dict:
     gates = build_gates(state)
     round_ = state.get("build_round", 1)
     failing = [name for name, ok in gates.items() if not ok]
+    if state.get("isolation_violations"):
+        # Never loop on a breach: another round could do it again.
+        return {
+            "build_status": "failed",
+            "decisions": [
+                "Build stopped: a role wrote outside the worktree. Check: "
+                + "; ".join(state["isolation_violations"][:5])
+            ],
+        }
     if not failing:
         return {
             "build_status": "passed",
@@ -679,6 +711,8 @@ def next_role(state: TeamState) -> str:
         if status is None:
             if not state.get("worktree"):
                 return "build_workspace"
+            if state.get("isolation_violations"):
+                return "build_gate"
             done = state.get("round_done", [])
             for engineer in ENGINEERS:
                 if engineer in staff and engineer not in done:
