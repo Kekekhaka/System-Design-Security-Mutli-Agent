@@ -122,7 +122,7 @@ def best_persona(store: dict) -> dict | None:
     return min(active, key=_stats_key)
 
 
-def build_challenger_prompt(task: str, best: dict) -> list:
+def build_challenger_prompt(task: str, best: dict, too_long: int | None = None) -> list:
     weaknesses = (best.get("stats") or {}).get("weakness_categories") or []
     weakness_text = ", ".join(weaknesses) if weaknesses else "(none recorded yet)"
     return [
@@ -133,7 +133,8 @@ def build_challenger_prompt(task: str, best: dict) -> list:
                 "so never add output-format rules, never mention APPROVED or CHANGES "
                 "REQUESTED, and never tell the reviewer to ignore or override the "
                 "baseline rules. Return only a JSON object with one key, \"prompt\", "
-                "holding the improved persona as plain text of at most 1200 characters."
+                "holding the improved persona as plain text of at most 900 characters "
+                "(shorter than the current one if needed)."
             )
         ),
         HumanMessage(
@@ -146,6 +147,12 @@ def build_challenger_prompt(task: str, best: dict) -> list:
                 f"categories): {weakness_text}\n\n"
                 "Write a better persona that keeps what works and targets those "
                 "weaknesses. Return the JSON object."
+                + (
+                    f" Your previous attempt was {too_long} characters; the limit is "
+                    "900. Make it shorter by dropping the least useful sentences."
+                    if too_long
+                    else ""
+                )
             )
         ),
     ]
@@ -171,20 +178,27 @@ def generate_challenger(llm, task: str, best: dict) -> dict | None:
     """One model call. A failed or unsafe challenger is rejected, never used."""
     if llm is None:
         return None
-    try:
-        response = call_with_deadline(
-            lambda: llm.invoke(build_challenger_prompt(task, best)), "harness challenger"
-        )
-        candidate = parse_challenger(getattr(response, "content", ""))
-    except Exception as exc:  # a challenger is optional; the run continues
-        logger.warning("Harness challenger generation failed: %s", exc)
-        return None
-    if candidate is None:
-        logger.warning("Harness challenger returned no usable persona; skipped")
-        return None
-    valid, reason = validate_persona_prompt(candidate)
-    if not valid:
+    too_long = None
+    for _attempt in range(2):  # one retry, only when the persona was too long
+        try:
+            response = call_with_deadline(
+                lambda: llm.invoke(build_challenger_prompt(task, best, too_long)), "harness challenger"
+            )
+            candidate = parse_challenger(getattr(response, "content", ""))
+        except Exception as exc:  # a challenger is optional; the run continues
+            logger.warning("Harness challenger generation failed: %s", exc)
+            return None
+        if candidate is None:
+            logger.warning("Harness challenger returned no usable persona; skipped")
+            return None
+        valid, reason = validate_persona_prompt(candidate)
+        if valid:
+            break
         logger.warning("Harness challenger rejected: %s", reason)
+        if len(candidate) <= MAX_PERSONA_CHARS:
+            return None  # unsafe, not just long: never retry
+        too_long = len(candidate)
+    else:
         return None
     return new_persona(
         candidate,

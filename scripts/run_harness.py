@@ -257,8 +257,12 @@ def _persist(
     winner_id = winner.get("persona_id") if winner else None
     by_id = {item.get("persona_id"): item for item in results}
     failed_ids = {item.get("persona_id") for item in failures}
-    for persona in chosen:
-        persona_id = persona.get("id")
+    stored = {item.get("id"): item for item in store.get("personas", [])}
+    for chosen_persona in chosen:
+        persona_id = chosen_persona.get("id")
+        # Record on the stored entry: `chosen` may hold a fresh copy (e.g. a seed), and
+        # outcomes recorded on a copy are lost.
+        persona = stored.get(persona_id, chosen_persona)
         if persona_id in failed_ids:
             record_outcome(persona, outcome="failed")
             continue
