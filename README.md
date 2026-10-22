@@ -256,6 +256,56 @@ The response includes `winning_prompt`, the winning design (`final_architecture`
 `api_spec`, `security_audit`, `approved`, `total_revisions`) and a `probes` summary
 comparing every candidate.
 
+### Harness2 learns
+
+`scripts/run_harness.py` runs one optimization offline and keeps what it learned
+in a small persona library. Each run exploits the best persona, asks the model
+for one challenger improved from that persona's recorded weaknesses, fills the
+rest from the seeds, re-audits every final design with the fixed baseline
+auditor, and ranks candidates by baseline approval, then severity-weighted
+findings (Critical 10, High 5, Medium 2, Low 1), then revisions.
+
+```powershell
+python scripts/run_harness.py --brief "Design a booking API for a guest house."
+python scripts/run_harness.py --brief-file brief.md --candidates 2 --max-revisions 2
+python scripts/run_harness.py --brief-file brief.md --dry-run   # model calls, no run
+python scripts/harness_report.py --trend 20
+python scripts/harness_champion.py show
+python scripts/harness_champion.py promote p_abc123 --yes --reason "3 clean wins"
+python scripts/harness_champion.py rollback --yes
+```
+
+The store defaults to `data/harness/personas.json` (git-ignored) and the history
+to `data/harness/history.jsonl`. Writes are atomic; a corrupt store is moved
+aside as `personas.json.bad` and the seeds are used. History stores a keyed task
+hash, never the task text. A candidate that fails is retried once, then recorded
+and skipped; the run fails only if every candidate fails, and even then the
+history is written.
+
+Personas are validated before use: at most 1200 characters of plain text, no
+`APPROVED` / `CHANGES REQUESTED` output-protocol words, and no instruction to
+ignore or override the baseline rules. `with_review_emphasis` is unchanged.
+
+A champion is promoted only by the operator, after at least three wins on two
+different tasks and a golden-fixture check (run with the same logic as
+`scripts/eval_security_agent.py`) showing no loss of planted-flaw recall and no
+increase in hallucinated findings. Opt the team pipeline in with
+`HARNESS_USE_CHAMPION=true`; its design and code audits then layer the champion's
+emphasis on the baseline prompt and the team log records the persona id. With it
+off, behaviour is exactly as before.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `HARNESS_STORE_PATH` | `data/harness/personas.json` | Persona library path |
+| `HARNESS_HISTORY_PATH` | sibling `history.jsonl` | Append-only run history |
+| `HARNESS_MAX_REVISIONS` | `0` (use `MAX_REVISIONS`) | Per-candidate revision cap |
+| `HARNESS_LIBRARY_CAP` | `12` | Active personas; the worst is retired above it |
+| `HARNESS_REASONING_EFFORT` | `none` | Reasoning for harness runs |
+| `HARNESS_USE_CHAMPION` | `false` | Use the champion in the team audits |
+| `HARNESS_HMAC_KEY` | empty | HMAC key for store/history integrity |
+| `HARNESS_MAX_MODEL_CALLS` | `0` (estimate + 2) | Hard per-run call budget |
+| `HARNESS_SANITY_FIXTURES` | `2` | Baseline sanity checks before a run |
+
 ## Evaluation
 
 `scripts/eval_security_agent.py` is an LLM-as-judge evaluation of the security

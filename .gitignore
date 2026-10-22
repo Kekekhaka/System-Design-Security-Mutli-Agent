@@ -14,3 +14,5 @@ eval_results.json
 /export/
 /reviews/
 /runs/
+# Harness2 persona library and run history
+data/harness/

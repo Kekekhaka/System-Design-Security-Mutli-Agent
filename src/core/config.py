@@ -46,6 +46,23 @@ class Settings(BaseSettings):
     DESIGN_TIMEOUT_SECONDS: int = 120
 
     HARNESS_CANDIDATES: int = 3
+    # Harness2 persona library. Empty paths resolve to data/harness/.
+    HARNESS_STORE_PATH: str = ""
+    HARNESS_HISTORY_PATH: str = ""
+    # 0 means "use MAX_REVISIONS".
+    HARNESS_MAX_REVISIONS: int = 0
+    HARNESS_LIBRARY_CAP: int = 12
+    # Reasoning is off by default for harness runs: a candidate must not spend
+    # its whole output budget on hidden reasoning.
+    HARNESS_REASONING_EFFORT: str = "none"
+    # Opt in to the promoted champion persona in the team's audits.
+    HARNESS_USE_CHAMPION: bool = False
+    # HMAC key for the persona store and run history (empty = unsigned store).
+    HARNESS_HMAC_KEY: str = ""
+    # Hard per-run model-call cap. 0 means "estimate + 2".
+    HARNESS_MAX_MODEL_CALLS: int = 0
+    # Fixture calls spent proving the baseline auditor still works (2 fixtures).
+    HARNESS_SANITY_FIXTURES: int = 2
 
     # Team build runs (scripts/run_team.py --build): the engineers and QA are
     # opencode runs in an isolated git worktree; the tests run there for real.

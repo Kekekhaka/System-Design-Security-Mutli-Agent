@@ -38,6 +38,7 @@ from langgraph.graph import END, START, StateGraph
 
 from src.agents.nodes import is_approved, make_designer_node, make_security_node
 from src.agents.security.graph import build_security_subgraph
+from src.agents.security.prompts import with_review_emphasis
 from src.agents.security.report import (
     SecurityReport,
     inconsistency,
@@ -321,8 +322,8 @@ def make_designer_team_node(llm, retriever=None):
     return designer_team_node
 
 
-def make_design_audit_node(llm, retriever=None):
-    security = make_security_node(llm, retriever=retriever)
+def make_design_audit_node(llm, retriever=None, system_prompt=None, persona_id=None):
+    security = make_security_node(llm, system_prompt=system_prompt, retriever=retriever)
 
     def design_audit_node(state: TeamState) -> dict:
         update = security(state)
@@ -334,6 +335,11 @@ def make_design_audit_node(llm, retriever=None):
                 "note": f"Design audit round {update['revision_count']}: {verdict}",
             }
         ]
+        if persona_id:
+            update["decisions"] = [
+                f"Design audit used harness champion {persona_id} "
+                "(HARNESS_USE_CHAMPION=true)."
+            ]
         update["model_calls"] = _calls(state, SECURITY_CALLS)
         return update
 
@@ -513,8 +519,8 @@ def make_reviewer_node(llm):
     return reviewer_node
 
 
-def make_code_audit_node(llm, retriever=None):
-    subgraph = build_security_subgraph(llm, retriever=retriever)
+def make_code_audit_node(llm, retriever=None, system_prompt=None, persona_id=None):
+    subgraph = build_security_subgraph(llm, system_prompt=system_prompt, retriever=retriever)
 
     def code_audit_node(state: TeamState) -> dict:
         architecture = (
@@ -525,7 +531,7 @@ def make_code_audit_node(llm, retriever=None):
         result = subgraph.invoke({"architecture": architecture, "api_spec": state.get("api_spec") or ""})
         findings = result["security_findings"]
         verdict = "APPROVED" if is_approved(findings) else "CHANGES REQUESTED"
-        return {
+        update = {
             "code_security_findings": findings,
             "round_done": [*state.get("round_done", []), "code-audit"],
             "model_calls": _calls(state, SECURITY_CALLS),
@@ -534,6 +540,12 @@ def make_code_audit_node(llm, retriever=None):
                  "note": f"Code audit round {state.get('build_round', 1)}: {verdict}"}
             ],
         }
+        if persona_id:
+            update["decisions"] = [
+                f"Code audit used harness champion {persona_id} "
+                "(HARNESS_USE_CHAMPION=true)."
+            ]
+        return update
 
     return code_audit_node
 
@@ -782,12 +794,32 @@ MODEL_STAGES = (
 )
 
 
+def _resolve_champion(champion=None):
+    """Return (persona_id, emphasis prompt) for the team audits.
+
+    With HARNESS_USE_CHAMPION false this is (None, None), so behaviour is
+    exactly as before. An invalid champion fails closed: it is never swapped
+    for the default persona.
+    """
+    if champion is not None:
+        return champion.get("id"), champion.get("prompt")
+    if not settings.HARNESS_USE_CHAMPION:
+        return None, None
+    from src.harness.store import load_champion
+
+    persona = load_champion()
+    if persona is None:
+        return None, None
+    return persona.get("id"), persona.get("prompt")
+
+
 def build_team_graph(
     llm=None,
     security_retriever=None,
     design_retriever=None,
     checkpointer=None,
     workspace=None,
+    champion=None,
 ):
     """Compile the team pipeline. Retrievers load by default, as in build_multi_agent."""
     llm = llm if llm is not None else get_llm()
@@ -797,18 +829,33 @@ def build_team_graph(
         design_retriever = load_design_retriever()
     workspace = workspace if workspace is not None else GitWorkspace.from_settings()
 
+    champion_id, champion_prompt = _resolve_champion(champion)
+    champion_system_prompt = (
+        with_review_emphasis(champion_prompt) if champion_prompt is not None else None
+    )
+
     nodes = {
         "team_lead_plan": make_plan_node(llm),
         "business_analyst": make_business_analyst_node(llm),
         "designer": make_designer_team_node(llm, retriever=design_retriever),
-        "security_engineer": make_design_audit_node(llm, retriever=security_retriever),
+        "security_engineer": make_design_audit_node(
+            llm,
+            retriever=security_retriever,
+            system_prompt=champion_system_prompt,
+            persona_id=champion_id,
+        ),
         "build_workspace": make_workspace_node(workspace),
         "backend_engineer": make_opencode_node("backend-engineer", workspace),
         "frontend_engineer": make_opencode_node("frontend-engineer", workspace),
         "qa_analyst": make_opencode_node("qa-analyst", workspace),
         "test_run": make_test_run_node(workspace),
         "reviewer": make_reviewer_node(llm),
-        "code_audit": make_code_audit_node(llm, retriever=security_retriever),
+        "code_audit": make_code_audit_node(
+            llm,
+            retriever=security_retriever,
+            system_prompt=champion_system_prompt,
+            persona_id=champion_id,
+        ),
         "build_gate": build_gate_node,
         "devops_engineer": make_devops_node(llm),
         "business_analyst_docs": make_docs_node(llm),

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import random
 import re
 from functools import lru_cache
 from typing import TypedDict
@@ -13,7 +14,14 @@ from src.agents.nodes import is_approved
 from src.agents.security.graph import build_security_subgraph
 from src.agents.security.prompts import with_review_emphasis
 from src.core.config import settings
-from src.core.llm import call_with_deadline, get_llm
+from src.core.llm import ModelCallTimeout, ModelOutputError, call_with_deadline, get_llm
+from src.harness.guard import critical_rule_guard
+from src.harness.scoring import (  # noqa: F401  (pick_winner/score_result are re-exported)
+    pick_winner,
+    score_result,
+    weighted_findings,
+)
+from src.harness.seeds import FALLBACK_CANDIDATES, persona_id
 from src.knowledge.retriever import load_default_retriever
 
 logger = logging.getLogger(__name__)
@@ -23,24 +31,21 @@ PROPOSE_SYSTEM_PROMPT = (
     "Output only a valid JSON array of strings in English."
 )
 
-FALLBACK_CANDIDATES = [
-    "You are a strict compliance auditor. Review the design against OWASP API "
-    "Security Top 10 and PCI-DSS; cite the exact control each finding violates.",
-    "You are a red-team adversary. Hunt for business-logic abuse, broken "
-    "authorization chains and realistic attack paths an attacker would use.",
-    "You are a cloud security architect. Scrutinize IAM boundaries, network "
-    "segmentation, multi-tenant isolation, secrets management and blast radius.",
-    "You are a privacy and data-protection reviewer. Focus on PII flows, data "
-    "minimization, retention, encryption and regulatory exposure.",
-    "You are an abuse-prevention engineer. Prioritize rate limiting, idempotency, "
-    "replay protection, fraud paths and resource-exhaustion vectors.",
-]
+
+class AllCandidatesFailed(RuntimeError):
+    """Every candidate failed twice. The failures travel with the error."""
+
+    def __init__(self, failures: list[dict]):
+        super().__init__("All harness probes failed; see logs for details.")
+        self.failures = failures
 
 
-class HarnessState(TypedDict):
+class HarnessState(TypedDict, total=False):
     task: str
     candidate_prompts: list[str]
+    candidate_personas: list[dict]
     probe_results: list[dict]
+    failures: list[dict]
     winning_prompt: str
 
 
@@ -88,6 +93,9 @@ def parse_candidates(content: str, count: int) -> list[str]:
 
 def make_propose_node(llm):
     def propose_node(state: HarnessState) -> dict:
+        # A caller that selected from the library passes the candidates in.
+        if state.get("candidate_prompts"):
+            return {"candidate_prompts": state["candidate_prompts"]}
         messages = [
             SystemMessage(content=PROPOSE_SYSTEM_PROMPT),
             HumanMessage(
@@ -104,68 +112,125 @@ def make_propose_node(llm):
     return propose_node
 
 
+def _failure_reason(exc: BaseException) -> str:
+    text = str(exc).lower()
+    if isinstance(exc, ModelCallTimeout) or "timed out" in text or "timeout" in text:
+        return "timeout"
+    if (
+        isinstance(exc, ModelOutputError)
+        or "token" in text
+        or "truncated" in text
+        or "no output" in text
+    ):
+        return "token_limit"
+    return "provider_error"
+
+
 def make_probe_node(agent_llm_factory, judge):
-    """Run every candidate in parallel, then score each final design with `judge`.
+    """Run every candidate in parallel, retry a failure once, score the rest.
 
     Candidates only add emphasis on top of SECURITY_SYSTEM_PROMPT, and approval
     comes from one fixed baseline auditor rather than the candidate's own
-    verdict, so a lenient persona cannot win by approving weak designs.
+    verdict, so a lenient persona cannot win by approving weak designs. A
+    candidate that fails twice is recorded and the run continues with the
+    others.
     """
 
     async def probe_node(state: HarnessState) -> dict:
+        personas = state.get("candidate_personas") or [
+            {"id": persona_id(prompt), "prompt": prompt}
+            for prompt in state.get("candidate_prompts", [])
+        ]
         probes = []
-        for prompt in state["candidate_prompts"]:
+        for persona in personas:
             graph = build_multi_agent(
                 llm=agent_llm_factory(),
-                security_prompt=with_review_emphasis(prompt),
+                security_prompt=with_review_emphasis(persona["prompt"]),
             )
-            probes.append((prompt, graph))
+            probes.append((persona, graph))
 
-        async def run_candidate(prompt: str, graph) -> dict:
-            final_state = await graph.ainvoke(initial_state(state["task"]))
-            architecture = final_state.get("architecture") or ""
-            api_spec = final_state.get("api_spec") or ""
-            verdict = await judge.ainvoke(
-                {"architecture": architecture, "api_spec": api_spec}
+        async def run_candidate(persona: dict, graph) -> dict:
+            last_error: BaseException | None = None
+            for attempt in (1, 2):
+                try:
+                    final_state = await graph.ainvoke(initial_state(state["task"]))
+                    architecture = final_state.get("architecture") or ""
+                    api_spec = final_state.get("api_spec") or ""
+                    verdict = await judge.ainvoke(
+                        {"architecture": architecture, "api_spec": api_spec}
+                    )
+                    findings = verdict["security_findings"]
+                    approved = is_approved(findings)
+                    guard = critical_rule_guard(architecture, api_spec)
+                    if guard and approved:
+                        findings = (
+                            "CHANGES REQUESTED\n"
+                            f"CriticalRuleGuard: {guard}\n"
+                            f"{findings}"
+                        )
+                        approved = False
+                    return {
+                        "persona_id": persona.get("id"),
+                        "prompt": persona["prompt"],
+                        "revisions": final_state.get("revision_count", 0),
+                        "approved": approved,
+                        "weighted": weighted_findings(findings),
+                        "findings_length": len(findings or ""),
+                        "architecture": architecture,
+                        "api_spec": api_spec,
+                        "findings": findings,
+                        "outcome": "approved" if approved else "not_approved",
+                    }
+                except Exception as exc:  # retry once, then record and continue
+                    last_error = exc
+                    if attempt == 1:
+                        delay = 0.1 + random.random() * 0.1
+                        logger.warning(
+                            "Harness candidate %s failed (%s); retrying once",
+                            persona.get("id"),
+                            exc,
+                        )
+                        await asyncio.sleep(delay)
+            reason = _failure_reason(last_error) if last_error else "provider_error"
+            logger.warning(
+                "Harness candidate %s failed twice (%s): %s",
+                persona.get("id"),
+                reason,
+                last_error,
             )
-            findings = verdict["security_findings"]
             return {
-                "prompt": prompt,
-                "revisions": final_state.get("revision_count", 0),
-                "approved": is_approved(findings),
-                "architecture": architecture,
-                "api_spec": api_spec,
-                "findings": findings,
+                "persona_id": persona.get("id"),
+                "prompt": persona["prompt"],
+                "failed": True,
+                "outcome": "failed",
+                "failure_reason": reason,
             }
 
         outcomes = await asyncio.gather(
-            *(run_candidate(prompt, graph) for prompt, graph in probes),
+            *(run_candidate(persona, graph) for persona, graph in probes),
             return_exceptions=True,
         )
         results = []
-        for (prompt, _), outcome in zip(probes, outcomes):
+        failures = []
+        for (persona, _), outcome in zip(probes, outcomes):
             if isinstance(outcome, BaseException):
-                logger.warning("Harness probe failed for candidate %r: %s", prompt[:80], outcome)
+                failures.append(
+                    {
+                        "persona_id": persona.get("id"),
+                        "prompt": persona["prompt"],
+                        "outcome": "failed",
+                        "failure_reason": _failure_reason(outcome),
+                    }
+                )
+            elif outcome.get("failed"):
+                failures.append(outcome)
             else:
                 results.append(outcome)
         if not results:
-            raise RuntimeError("All harness probes failed; see logs for details.")
-        return {"probe_results": results}
+            raise AllCandidatesFailed(failures)
+        return {"probe_results": results, "failures": failures}
 
     return probe_node
-
-
-def score_result(result: dict) -> tuple:
-    """Approval beats rejection, then fewest revisions, then leanest report."""
-    return (
-        not result.get("approved", False),
-        result.get("revisions", 0),
-        len(result.get("findings") or ""),
-    )
-
-
-def pick_winner(results: list[dict]) -> dict:
-    return min(results, key=score_result)
 
 
 def compose_node(state: HarnessState) -> dict:
