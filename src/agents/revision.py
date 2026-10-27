@@ -13,6 +13,12 @@ Rules:
 every control that the change brief does not mention. Do not re-invent or drop anything.
 - Apply every change in the change brief and only those. Anything listed under KEEP, \
 DEFER or NOT in this revision must stay exactly as it is today.
+- What the brief lists under KEEP, DEFER or NOT in this revision are the owner's \
+decisions and accepted risks. When a security finding asks for one of them (for \
+example MFA while MFA is deferred, a CAPTCHA, a queue, or any new external service), \
+do NOT add it, even though findings are normally fixed: record it in section 9 as \
+"accepted by the owner" and move on. Never add a service, model, route, flag or \
+dependency that the brief does not name.
 - The existing design is the source of truth for what the system does now. Where you \
 must assume something, say so.
 - Keep the structure and level of detail of the existing description. For the \

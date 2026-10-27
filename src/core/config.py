@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = "deepseek/deepseek-v4-flash"
     OPENROUTER_FALLBACK_MODEL: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    # Model clients refuse any base URL that is not openrouter.ai. Set true only to
+    # deliberately allow another endpoint (for example a local model server).
+    ALLOW_NON_OPENROUTER: bool = False
     # Output budget per call, reasoning tokens included. DeepSeek V4 Flash can
     # reason past 4096 tokens and return no text at all, so keep this generous.
     LLM_MAX_TOKENS: int = 32000
@@ -67,7 +70,15 @@ class Settings(BaseSettings):
     # Team build runs (scripts/run_team.py --build): the engineers and QA are
     # opencode runs in an isolated git worktree; the tests run there for real.
     OPENCODE_BIN: str = "opencode"
-    OPENCODE_MODEL: str = "opencode/deepseek-v4.1-flash-free"
+    # Every model call goes through OpenRouter, opencode included: the model must be
+    # "openrouter/<vendor>/<model>". The old default, opencode's own free provider,
+    # bypassed OpenRouter.
+    OPENCODE_MODEL: str = "openrouter/deepseek/deepseek-v4-flash"
+    # A DEDICATED OpenRouter key for opencode builds only (create one with a small credit
+    # limit at openrouter.ai/settings/keys). It is passed to the opencode process alone;
+    # git and the tests never get it, and the main OPENROUTER_API_KEY never reaches the
+    # build. It must differ from OPENROUTER_API_KEY. Builds refuse to start without it.
+    OPENCODE_OPENROUTER_API_KEY: str = ""
     ENGINEER_TIMEOUT_SECONDS: int = 1800
     TEAM_TEST_COMMAND: str = "python -m pytest -q"
     TEAM_TEST_TIMEOUT_SECONDS: int = 900

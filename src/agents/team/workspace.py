@@ -113,9 +113,14 @@ class GitWorkspace:
         diff_max_chars: int,
         worktree_root: Path | None = None,
         runner=subprocess.run,
+        opencode_api_key: str = "",
+        enforce_openrouter: bool = False,
     ) -> None:
         self.opencode_bin = opencode_bin
         self.opencode_model = opencode_model
+        # Passed to the opencode process only; see check_openrouter().
+        self.opencode_api_key = opencode_api_key
+        self.enforce_openrouter = enforce_openrouter
         self.engineer_timeout = engineer_timeout
         self.test_command = test_command
         self.test_timeout = test_timeout
@@ -134,7 +139,36 @@ class GitWorkspace:
             settings.BUILD_DIFF_MAX_CHARS,
             worktree_root=default_worktree_root(),
             runner=runner,
+            opencode_api_key=settings.OPENCODE_OPENROUTER_API_KEY,
+            enforce_openrouter=True,
         )
+
+    def check_openrouter(self) -> None:
+        """Fail closed unless the build's model calls will go through OpenRouter.
+
+        The model must be an `openrouter/...` model, and opencode needs its own OpenRouter
+        key. That key must differ from the main OPENROUTER_API_KEY: the build agent runs
+        commands in the worktree, so the key in its environment is exposed to it, and a
+        dedicated key with a small credit limit caps the damage.
+        """
+        if not self.enforce_openrouter or settings.ALLOW_NON_OPENROUTER:
+            return
+        if not self.opencode_model.startswith("openrouter/"):
+            raise WorkspaceError(
+                f"OPENCODE_MODEL {self.opencode_model!r} is not an OpenRouter model. Use "
+                "openrouter/<vendor>/<model>, for example openrouter/deepseek/deepseek-v4-flash."
+            )
+        if not self.opencode_api_key:
+            raise WorkspaceError(
+                "OPENCODE_OPENROUTER_API_KEY is not set. Create a dedicated OpenRouter key "
+                "with a small credit limit at openrouter.ai/settings/keys and put it in .env. "
+                "It is passed to opencode only; your main OPENROUTER_API_KEY never reaches the build."
+            )
+        if self.opencode_api_key == settings.OPENROUTER_API_KEY:
+            raise WorkspaceError(
+                "OPENCODE_OPENROUTER_API_KEY is the same as OPENROUTER_API_KEY. Use a separate "
+                "key, so the build cannot spend or leak the main one."
+            )
 
     def _env(self, cwd: Path | None = None) -> dict[str, str]:
         env = safe_env()
@@ -150,12 +184,21 @@ class GitWorkspace:
             env.pop("PWD", None)
         return env
 
-    def _run(self, command: list[str] | str, cwd: Path, timeout: int | None = 120) -> CommandResult:
+    def _run(
+        self,
+        command: list[str] | str,
+        cwd: Path,
+        timeout: int | None = 120,
+        extra_env: dict[str, str] | None = None,
+    ) -> CommandResult:
+        env = self._env(cwd)
+        if extra_env:
+            env.update(extra_env)
         try:
             completed = self.runner(
                 command,
                 cwd=str(cwd),
-                env=self._env(cwd),
+                env=env,
                 # opencode reads piped stdin and stops at start-up if it never closes.
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
@@ -188,6 +231,7 @@ class GitWorkspace:
 
     def create(self, repo: Path, run_id: str) -> tuple[Path, str]:
         """Add a worktree of `repo` at HEAD on a new branch; return (path, branch)."""
+        self.check_openrouter()  # before anything is created
         repo = Path(repo).resolve()
         if not self._git(repo, "rev-parse", "--show-toplevel").ok:
             raise WorkspaceError(f"{repo} is not a git repository")
@@ -220,7 +264,9 @@ class GitWorkspace:
             self.opencode_bin, "run", OPENCODE_MESSAGE,
             "-m", self.opencode_model, "--title", title, "-f", str(Path(brief).resolve()),
         ]
-        return self._run(command, worktree, timeout=self.engineer_timeout)
+        # The one command that gets a key: opencode's own OpenRouter calls need it.
+        extra_env = {"OPENROUTER_API_KEY": self.opencode_api_key} if self.opencode_api_key else None
+        return self._run(command, worktree, timeout=self.engineer_timeout, extra_env=extra_env)
 
     def changed_paths(self, worktree: Path) -> set[str]:
         paths = set()

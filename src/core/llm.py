@@ -1,7 +1,9 @@
 import contextvars
 import logging
 import threading
+import time
 from functools import lru_cache
+from urllib.parse import urlparse
 
 from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
@@ -60,8 +62,16 @@ def call_with_deadline(fn, stage: str, timeout: float | None = None):
             outcome["error"] = exc
 
     thread = threading.Thread(target=target, daemon=True, name=f"llm-{stage}")
+    # Wall-clock deadline, polled every second: a single long join() runs on the
+    # interpreter's monotonic clock, and two live runs stalled well past their
+    # limit with idle connections.
+    deadline = time.time() + seconds
     thread.start()
-    thread.join(seconds)
+    while thread.is_alive():
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        thread.join(min(remaining, 1.0))
     if thread.is_alive():
         raise ModelCallTimeout(
             f"The {stage} stage did not finish within {seconds:g}s. Raise "
@@ -121,12 +131,31 @@ def invoke_checked(llm, messages, stage: str, attempts: int = 3) -> str:
     raise AssertionError("unreachable")
 
 
+def require_openrouter(base_url: str) -> None:
+    """Refuse to build a model client for anything but OpenRouter.
+
+    The host must be openrouter.ai or one of its subdomains; look-alikes such as
+    openrouter.ai.example.com do not pass. ALLOW_NON_OPENROUTER is the explicit opt-out.
+    """
+    if settings.ALLOW_NON_OPENROUTER:
+        return
+    host = (urlparse(base_url).hostname or "").lower()
+    if host == "openrouter.ai" or host.endswith(".openrouter.ai"):
+        return
+    raise RuntimeError(
+        f"OPENROUTER_BASE_URL is {base_url!r}, which is not OpenRouter. Every model call "
+        "must go through OpenRouter (https://openrouter.ai/api/v1). Set "
+        "ALLOW_NON_OPENROUTER=true only if you mean to use another endpoint."
+    )
+
+
 def _chat_model(
     model: str,
     temperature: float,
     max_tokens: int | None = None,
     reasoning_effort: str | None = None,
 ) -> ChatOpenAI:
+    require_openrouter(settings.OPENROUTER_BASE_URL)
     extra = {"extra_body": {"reasoning": {"effort": reasoning_effort}}} if reasoning_effort else {}
     return ChatOpenAI(
         model=model,

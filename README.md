@@ -62,8 +62,8 @@ senior professional with a definition of done and clear escalation points:
 | business analyst | bounds a vague idea; requirements with IDs (pass 1); final docs (pass 2) | OpenRouter |
 | designer | the house designer (a senior system architect); every run | OpenRouter |
 | security engineer | audits every design, and the real code changes in build runs | OpenRouter |
-| backend engineer, frontend engineer | implement the approved API spec | opencode |
-| QA analyst | writes tests against the acceptance criteria | opencode |
+| backend engineer, frontend engineer | implement the approved API spec | opencode, via OpenRouter |
+| QA analyst | writes tests against the acceptance criteria | opencode, via OpenRouter |
 | reviewer | reviews the real diff against the design and the contract | OpenRouter |
 | DevOps engineer | writes the deploy plan when something deploys | OpenRouter |
 
@@ -119,7 +119,7 @@ close:               devops engineer* -> business analyst docs* -> team lead sig
 With `--build --repo <path>`, an APPROVED design is built:
 
 - The engineers and QA are **opencode** runs (`OPENCODE_MODEL`, default
-  `opencode/deepseek-v4.1-flash-free`) in a **git worktree** of the repository on
+  `openrouter/deepseek/deepseek-v4-flash`) in a **git worktree** of the repository on
   a new branch `team/<run id>`. The operator's checkout is never touched, and
   untracked files such as `.env` are not in a worktree.
 - Worktrees live under `TEAM_WORKTREE_ROOT` (default: `<system temp>/team-worktrees`),
@@ -131,7 +131,9 @@ With `--build --repo <path>`, an APPROVED design is built:
   build at once and is reported; it never loops.
 - Variables that look like secrets (keys, tokens, passwords, `OPENROUTER_*`,
   `LLM_*` and so on) are removed from the environment opencode and the tests run
-  with, and the tests run without writing bytecode. Tool caches never count as
+  with, and the tests run without writing bytecode. The only key a build process gets is
+  `OPENCODE_OPENROUTER_API_KEY`, and only the opencode process (see *OpenRouter only*).
+  Tool caches never count as
   changes.
 - Each opencode run's output is saved next to its brief (`briefs/*.log`).
 - **The code audit is scoped to the diff.** For an existing system the design document
@@ -162,7 +164,7 @@ python scripts/run_team.py --brief-file brief.md --answers "Single clinic; no pa
 python scripts/run_team.py --brief-file brief.md --build --repo C:/path/to/repo
 ```
 
-Settings (in `.env`): `OPENCODE_BIN`, `OPENCODE_MODEL`, `ENGINEER_TIMEOUT_SECONDS`
+Settings (in `.env`): `OPENCODE_BIN`, `OPENCODE_MODEL`, `OPENCODE_OPENROUTER_API_KEY`, `ENGINEER_TIMEOUT_SECONDS`
 (default 1800), `TEAM_TEST_COMMAND` (default `python -m pytest -q`),
 `TEAM_TEST_TIMEOUT_SECONDS` (900), `BUILD_DIFF_MAX_CHARS` (60000) and
 `TEAM_WORKTREE_ROOT` and `TEAM_CALL_TIMEOUT_SECONDS` (600).
@@ -171,6 +173,27 @@ The script prints each step as it finishes and saves the artifacts after every
 step, so a crash or timeout keeps the finished work. Artifacts go to
 `runs/<timestamp>/` (gitignored). Exit codes: 0 approved, 1 could not run,
 2 escalated, 3 the team lead needs answers.
+
+### OpenRouter only
+
+Every model call goes through OpenRouter: the designer, the auditors, the harness, the
+export and the opencode build engineers alike.
+
+- **The Python side** builds every model client in one function, `get_llm`, which refuses
+  any base URL that is not `openrouter.ai` (look-alike hosts such as
+  `openrouter.ai.example.com` do not pass). `ALLOW_NON_OPENROUTER=true` is the explicit
+  opt-out, for example for a local model server.
+- **Build runs** need `OPENCODE_MODEL` to be `openrouter/<vendor>/<model>`. opencode needs
+  a key of its own, and the build agent runs commands in the worktree, so anything in its
+  environment can be read by what it runs. Create a **dedicated OpenRouter key with a small
+  credit limit** at openrouter.ai/settings/keys and put it in `.env` as
+  `OPENCODE_OPENROUTER_API_KEY`. It goes to the opencode process only; git and the tests
+  never see it, and your main `OPENROUTER_API_KEY` never reaches a build. It must differ
+  from the main key. A build refuses to start if the model is not an OpenRouter model, the
+  key is missing, or the key is the main one.
+- The review and revision scripts record `provider_base_url` in their manifests.
+- Other providers named inside a system you review (for example Azure OpenAI in the
+  student-card app) are part of that system's description, not calls this project makes.
 
 ## Setup
 

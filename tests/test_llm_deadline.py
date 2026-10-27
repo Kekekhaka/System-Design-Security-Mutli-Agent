@@ -161,3 +161,25 @@ def test_no_global_reasoning_effort_leaves_the_model_default(monkeypatch):
     monkeypatch.setattr(settings, "OPENROUTER_FALLBACK_MODEL", "")
     monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "")
     assert not llm_module.get_llm().extra_body
+
+
+def test_deadline_follows_the_wall_clock_not_one_long_join(monkeypatch):
+    # The deadline is polled against time.time(), so a clock that jumps forward (sleep,
+    # resume) ends the wait at once instead of waiting for a paused timer.
+    release = threading.Event()
+    real_time = time.time
+    jumped = {"by": 0.0}
+    monkeypatch.setattr(llm_module.time, "time", lambda: real_time() + jumped["by"])
+
+    def jump_later():
+        time.sleep(0.2)
+        jumped["by"] = 3600.0
+
+    threading.Thread(target=jump_later, daemon=True).start()
+    started = real_time()
+    try:
+        with pytest.raises(ModelCallTimeout):
+            call_with_deadline(lambda: release.wait(30), "stuck stage", timeout=600)
+        assert real_time() - started < 10
+    finally:
+        release.set()

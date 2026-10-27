@@ -109,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "reviewed_at": datetime.now(timezone.utc).isoformat(),
                 "model": settings.OPENROUTER_MODEL,
+                "provider_base_url": settings.OPENROUTER_BASE_URL,
                 "architecture_file": str(architecture_path),
                 "api_spec_file": str(api_spec_path),
                 "approved": approved,

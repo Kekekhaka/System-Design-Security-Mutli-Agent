@@ -79,6 +79,15 @@ def main(argv: list[str] | None = None) -> int:
         for update in graph.stream(initial_state(requirements), stream_mode="updates"):
             for node, values in update.items():
                 final.update(values or {})
+                # Save every round as it completes, so a stall or crash loses nothing.
+                round_dir = out_dir / f"round-{max(designs, 1) if node == 'security' else designs + 1}"
+                if node == "designer":
+                    round_dir.mkdir(exist_ok=True)
+                    write(round_dir / "architecture.md", values.get("architecture"))
+                    write(round_dir / "api-spec.md", values.get("api_spec"))
+                elif node == "security":
+                    round_dir.mkdir(exist_ok=True)
+                    write(round_dir / "security-report.md", values.get("security_findings"))
                 if node == "designer":
                     designs += 1
                     print(f"  [{time.time() - started:5.0f}s] designer finished round {designs}", flush=True)
@@ -99,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "revised_at": datetime.now(timezone.utc).isoformat(),
                 "model": settings.OPENROUTER_MODEL,
+                "provider_base_url": settings.OPENROUTER_BASE_URL,
                 "source_folder": str(folder),
                 "brief_file": str(args.brief),
                 "approved": approved,
