@@ -56,4 +56,40 @@ def test_production_config_problems_empty_when_hardened(monkeypatch):
     monkeypatch.setattr(settings, "ENABLE_DEV_AUTH", False)
     monkeypatch.setattr(settings, "CORS_ORIGINS", "https://ui.example.com")
     monkeypatch.setattr(settings, "DATABASE_URL", "postgresql://u:p@db/x")
+    monkeypatch.setattr(settings, "HARNESS_MAX_MODEL_CALLS", 100)
     assert production_config_problems() == []
+
+
+def test_production_requires_a_harness_call_cap(monkeypatch):
+    from src.main import production_config_problems
+
+    monkeypatch.setattr(settings, "ENABLE_DEV_AUTH", False)
+    monkeypatch.setattr(settings, "CORS_ORIGINS", "https://ui.example.com")
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql://u:p@db/x")
+    monkeypatch.setattr(settings, "HARNESS_MAX_MODEL_CALLS", 0)
+    problems = production_config_problems()
+    assert len(problems) == 1 and "HARNESS_MAX_MODEL_CALLS" in problems[0]
+
+
+def test_production_template_passes_its_own_checks(monkeypatch):
+    """Every setting in .env.production.example that the startup check reads is safe."""
+    from pathlib import Path
+
+    from src.harness.optimizer import api_model_calls
+    from src.main import production_config_problems
+
+    root = Path(__file__).resolve().parents[1]
+    values = dict(
+        line.split("=", 1)
+        for line in (root / ".env.production.example").read_text().splitlines()
+        if line and not line.startswith("#")
+    )
+    assert values["APP_ENV"] == "production" and values["ENABLE_DEV_AUTH"] == "false"
+    for name in ("MAX_REVISIONS", "HARNESS_CANDIDATES", "HARNESS_MAX_REVISIONS", "HARNESS_MAX_MODEL_CALLS"):
+        monkeypatch.setattr(settings, name, int(values[name]))
+    monkeypatch.setattr(settings, "ENABLE_DEV_AUTH", False)
+    monkeypatch.setattr(settings, "CORS_ORIGINS", "https://ui.example.com")
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql://u:p@db/x")
+    assert production_config_problems() == []
+    # The template's cap must leave room for one optimize request.
+    assert api_model_calls() == 91 <= settings.HARNESS_MAX_MODEL_CALLS

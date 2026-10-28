@@ -259,8 +259,9 @@ and the second audit approve.
 `docker compose up -d --build` runs the API as a non-root user, restarts both
 services after a reboot, and publishes the API on the server's `127.0.0.1:8000`
 only: reach it over SSH or Tailscale, never the public IP (Docker's published
-ports bypass `ufw`). Set `APP_ENV=production`; the app then refuses to start
-with dev login on, `CORS_ORIGINS=*` or no database.
+ports bypass `ufw`). Start the server's `.env` from `.env.production.example`.
+With `APP_ENV=production` the app refuses to start with dev login on,
+`CORS_ORIGINS=*`, no database, or no `HARNESS_MAX_MODEL_CALLS` cap.
 
 With dev login off, a service such as OpenClaw gets its own token:
 

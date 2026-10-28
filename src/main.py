@@ -25,6 +25,11 @@ def production_config_problems() -> list[str]:
         problems.append("CORS_ORIGINS must list explicit origins, not *")
     if not settings.DATABASE_URL:
         problems.append("DATABASE_URL must be set (sessions would be lost on restart)")
+    if settings.HARNESS_MAX_MODEL_CALLS <= 0:
+        problems.append(
+            "HARNESS_MAX_MODEL_CALLS must be set (one /project/optimize request "
+            "can otherwise make 160+ model calls)"
+        )
     return problems
 
 
