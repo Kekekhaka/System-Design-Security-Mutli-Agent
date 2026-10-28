@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -9,6 +10,9 @@ from src.core.config import settings
 bearer_scheme = HTTPBearer(auto_error=False)
 
 MIN_JWT_SECRET_LENGTH = 32
+# Service tokens (scripts/mint_service_token.py) use subjects with this prefix,
+# so a service and a user can never share a subject or its sessions.
+SERVICE_SUBJECT_PREFIX = "svc:"
 # Placeholders that have shipped in this repo; never accept them as real secrets.
 KNOWN_PLACEHOLDER_SECRETS = {
     "change-me-to-a-long-random-string",
@@ -28,14 +32,22 @@ def jwt_secret() -> str:
     return secret
 
 
-def create_access_token(subject: str) -> str:
+def create_access_token(
+    subject: str, expires_minutes: int | None = None, token_id: str | None = None
+) -> str:
     now = datetime.now(timezone.utc)
+    minutes = expires_minutes or settings.JWT_EXPIRE_MINUTES
     payload = {
         "sub": subject,
         "iat": now,
-        "exp": now + timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
+        "exp": now + timedelta(minutes=minutes),
     }
+    payload["jti"] = token_id or secrets.token_hex(8)
     return jwt.encode(payload, jwt_secret(), algorithm=settings.JWT_ALGORITHM)
+
+
+def revoked_token_ids() -> set[str]:
+    return {t.strip() for t in settings.REVOKED_TOKEN_IDS.split(",") if t.strip()}
 
 
 def get_current_user(
@@ -58,5 +70,7 @@ def get_current_user(
         raise unauthorized
     subject = payload.get("sub")
     if not subject:
+        raise unauthorized
+    if payload.get("jti") and payload["jti"] in revoked_token_ids():
         raise unauthorized
     return subject

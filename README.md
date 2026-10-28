@@ -39,7 +39,7 @@ The designer is grounded at design time too: with `DESIGN_RAG_ENABLED=true`
 payment flows) via the same retriever, so designs start from a house playbook
 instead of from scratch.
 
-Model: `deepseek/deepseek-v4-flash` via OpenRouter (1M context, ~$0.09/M in, ~$0.18/M out).
+Model: `deepseek/deepseek-v4.1-flash` via OpenRouter (1M context). Chosen by a benchmark of the real designer and audit stages: the most reliable and consistent of the DeepSeek Flash models tried (check OpenRouter for current prices).
 Set `OPENROUTER_FALLBACK_MODEL` to another OpenRouter model id for automatic
 failover on rate limits or provider outages; startup logs a warning while it is
 unset. `LLM_CALL_TIMEOUT_SECONDS` (default 1200) is a hard deadline on every model call: a
@@ -119,7 +119,7 @@ close:               devops engineer* -> business analyst docs* -> team lead sig
 With `--build --repo <path>`, an APPROVED design is built:
 
 - The engineers and QA are **opencode** runs (`OPENCODE_MODEL`, default
-  `openrouter/deepseek/deepseek-v4-flash`) in a **git worktree** of the repository on
+  `openrouter/deepseek/deepseek-v4.1-flash`) in a **git worktree** of the repository on
   a new branch `team/<run id>`. The operator's checkout is never touched, and
   untracked files such as `.env` are not in a worktree.
 - Worktrees live under `TEAM_WORKTREE_ROOT` (default: `<system temp>/team-worktrees`),
@@ -254,6 +254,36 @@ The response includes `final_architecture`, `api_spec`, `security_audit`,
 security agent flag the PCI-DSS violation, the designer switch to tokenization,
 and the second audit approve.
 
+## Deploying on a server
+
+`docker compose up -d --build` runs the API as a non-root user, restarts both
+services after a reboot, and publishes the API on the server's `127.0.0.1:8000`
+only: reach it over SSH or Tailscale, never the public IP (Docker's published
+ports bypass `ufw`). Set `APP_ENV=production`; the app then refuses to start
+with dev login on, `CORS_ORIGINS=*` or no database.
+
+With dev login off, a service such as OpenClaw gets its own token:
+
+```bash
+docker compose exec api python scripts/mint_service_token.py --subject openclaw --out /app/data/openclaw.token
+```
+
+Its subject is `svc:openclaw` (a namespace users cannot take), it lasts up to
+30 days, and its `token_id` is printed. Revoke one token by adding its id to
+`REVOKED_TOKEN_IDS` and restarting; revoke all by rotating `JWT_SECRET`.
+
+After every deploy:
+
+```bash
+python3 scripts/smoke_test.py --token "$(cat openclaw.token)"   # on the server
+docker compose exec api python scripts/smoke_test.py --live     # model call + Postgres
+```
+
+The first checks health, that dev login is off, that requests without a valid
+token get 401, that the service token is accepted (without starting a paid run),
+and that nothing but SSH listens on a public address. Each line reads PASS,
+SKIP or FAIL; the exit code is 1 if anything failed.
+
 ## Harness² (prompt optimization)
 
 `POST /project/optimize` runs the Propose-Probe-Compose loop (`src/harness/optimizer.py`):
@@ -264,9 +294,15 @@ fewest revisions. Personas are layered on top of `SECURITY_SYSTEM_PROMPT`
 (they add emphasis, never remove the OWASP / MITRE / source->sink rules), and
 every candidate's final design is re-audited by one fixed baseline auditor that
 decides `approved`. A persona that approves weak designs therefore cannot win.
-A failing probe is logged and skipped; the call fails only if every probe fails.
+A failing probe is logged and skipped; the call fails (502) only if every probe fails.
 Each user can have one optimization in flight (429 otherwise); with
 `DATABASE_URL` set this is a Postgres advisory lock, so it holds across workers.
+The endpoint applies the same budget as `scripts/run_harness.py`:
+`HARNESS_REASONING_EFFORT` (default `none`), `HARNESS_MAX_REVISIONS`, and, when
+`HARNESS_MAX_MODEL_CALLS` is set, a 403 before any model call if the worst case
+(candidates x 2 attempts x (rounds x 4 + 3 judge calls) + 1) is above it. With
+the defaults that worst case is 163 calls, so on a hosted server set
+`HARNESS_MAX_REVISIONS=1` or `2` and a cap.
 
 ```bash
 curl -X POST http://localhost:8000/project/optimize \

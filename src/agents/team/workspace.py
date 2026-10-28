@@ -156,7 +156,7 @@ class GitWorkspace:
         if not self.opencode_model.startswith("openrouter/"):
             raise WorkspaceError(
                 f"OPENCODE_MODEL {self.opencode_model!r} is not an OpenRouter model. Use "
-                "openrouter/<vendor>/<model>, for example openrouter/deepseek/deepseek-v4-flash."
+                "openrouter/<vendor>/<model>, for example openrouter/deepseek/deepseek-v4.1-flash."
             )
         if not self.opencode_api_key:
             raise WorkspaceError(

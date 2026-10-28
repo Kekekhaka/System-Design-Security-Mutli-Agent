@@ -49,6 +49,15 @@ class HarnessState(TypedDict, total=False):
     winning_prompt: str
 
 
+SECURITY_AUDIT_CALLS = 3  # scope, analyze, validate
+
+
+def harness_max_revisions() -> int:
+    """HARNESS_MAX_REVISIONS (0 = MAX_REVISIONS), never above MAX_REVISIONS."""
+    wanted = settings.HARNESS_MAX_REVISIONS or settings.MAX_REVISIONS
+    return max(0, min(wanted, settings.MAX_REVISIONS))
+
+
 def build_propose_prompt(task: str, count: int) -> str:
     return (
         f'We need to test different security reviewer personas for this task: "{task}"\n'
@@ -126,7 +135,7 @@ def _failure_reason(exc: BaseException) -> str:
     return "provider_error"
 
 
-def make_probe_node(agent_llm_factory, judge):
+def make_probe_node(agent_llm_factory, judge, max_revisions: int | None = None):
     """Run every candidate in parallel, retry a failure once, score the rest.
 
     Candidates only add emphasis on top of SECURITY_SYSTEM_PROMPT, and approval
@@ -153,7 +162,9 @@ def make_probe_node(agent_llm_factory, judge):
             last_error: BaseException | None = None
             for attempt in (1, 2):
                 try:
-                    final_state = await graph.ainvoke(initial_state(state["task"]))
+                    final_state = await graph.ainvoke(
+                        initial_state(state["task"], max_revisions=max_revisions)
+                    )
                     architecture = final_state.get("architecture") or ""
                     api_spec = final_state.get("api_spec") or ""
                     verdict = await judge.ainvoke(
@@ -238,7 +249,7 @@ def compose_node(state: HarnessState) -> dict:
 
 
 def build_harness_optimizer(
-    llm=None, agent_llm_factory=None, judge_llm=None, judge_retriever=None
+    llm=None, agent_llm_factory=None, judge_llm=None, judge_retriever=None, max_revisions=None
 ):
     """Compile the propose -> probe -> compose optimizer graph.
 
@@ -256,7 +267,7 @@ def build_harness_optimizer(
 
     builder = StateGraph(HarnessState)
     builder.add_node("propose", make_propose_node(llm))
-    builder.add_node("probe", make_probe_node(factory, judge))
+    builder.add_node("probe", make_probe_node(factory, judge, max_revisions))
     builder.add_node("compose", compose_node)
 
     builder.add_edge(START, "propose")
@@ -269,5 +280,27 @@ def build_harness_optimizer(
 
 @lru_cache(maxsize=1)
 def get_harness_optimizer():
-    """Process-wide optimizer app, mirroring get_multi_agent_app."""
-    return build_harness_optimizer()
+    """Process-wide optimizer app, mirroring get_multi_agent_app.
+
+    It applies HARNESS_REASONING_EFFORT and HARNESS_MAX_REVISIONS like
+    scripts/run_harness.py; the route checks HARNESS_MAX_MODEL_CALLS first.
+    """
+    effort = settings.HARNESS_REASONING_EFFORT or None
+    return build_harness_optimizer(
+        llm=get_llm(reasoning_effort=effort),
+        agent_llm_factory=lambda: get_llm(reasoning_effort=effort),
+        judge_llm=get_llm(temperature=0.0, reasoning_effort=effort),
+        max_revisions=harness_max_revisions(),
+    )
+
+
+def api_model_calls() -> int:
+    """Upper bound on model calls for one /project/optimize request.
+
+    Per candidate attempt: every round is a design plus a 3-call audit, then
+    the judge's 3-call audit; a failed candidate is retried once. Plus one
+    propose call. (Retries of an empty reply inside a call are not counted.)
+    """
+    rounds = harness_max_revisions() + 1
+    attempt = rounds * (1 + SECURITY_AUDIT_CALLS) + SECURITY_AUDIT_CALLS
+    return settings.HARNESS_CANDIDATES * 2 * attempt + 1

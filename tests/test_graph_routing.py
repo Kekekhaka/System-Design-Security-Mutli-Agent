@@ -172,3 +172,14 @@ def test_truncated_validator_output_names_the_cause():
     assert not is_approved(result["security_findings"])
     assert "truncated" in result["security_findings"]
     assert "LLM_MAX_TOKENS" in result["security_findings"]
+
+
+def test_a_per_run_revision_cap_stops_early_but_never_raises_the_limit(monkeypatch):
+    from src.agents.nodes import supervisor_node
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 3)
+    rejected = {"architecture": "a", "security_findings": "CHANGES REQUESTED - x"}
+    assert supervisor_node({**rejected, "revision_count": 1, "max_revisions": 1})["next_agent"] == "FINISH"
+    assert supervisor_node({**rejected, "revision_count": 1, "max_revisions": None})["next_agent"] == "designer"
+    assert supervisor_node({**rejected, "revision_count": 3, "max_revisions": 10})["next_agent"] == "FINISH"

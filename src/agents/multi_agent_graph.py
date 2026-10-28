@@ -60,12 +60,16 @@ def get_multi_agent_app():
     return build_multi_agent(checkpointer=InMemorySaver())
 
 
-def initial_state(requirements: str) -> dict:
-    """Fresh state, so repeated runs on the same thread_id never reuse old fields."""
+def initial_state(requirements: str, max_revisions: int | None = None) -> dict:
+    """Fresh state, so repeated runs on the same thread_id never reuse old fields.
+
+    `max_revisions` caps this run below MAX_REVISIONS (harness candidates use it).
+    """
     return {
         "requirements": requirements,
         "architecture": None,
         "api_spec": None,
         "security_findings": None,
         "revision_count": 0,
+        "max_revisions": max_revisions,
     }

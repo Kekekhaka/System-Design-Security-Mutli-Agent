@@ -9,4 +9,6 @@ class ProjectState(TypedDict):
     # Security specific
     security_findings: str | None
     revision_count: int
+    # Optional per-run cap, never above settings.MAX_REVISIONS.
+    max_revisions: int | None
     next_agent: Literal["designer", "security", "FINISH"]

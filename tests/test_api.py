@@ -188,3 +188,83 @@ def test_design_times_out_with_pointer_to_stream(monkeypatch):
     )
     assert response.status_code == 504
     assert "/project/design/stream" in response.json()["detail"]
+
+
+def test_optimize_reports_all_candidates_failed_as_502(monkeypatch):
+    from src.harness.optimizer import AllCandidatesFailed
+
+    class FailingOptimizer:
+        async def ainvoke(self, state, config=None):
+            raise AllCandidatesFailed(
+                [{"failure_reason": "timeout"}, {"failure_reason": "provider_error"}]
+            )
+
+    monkeypatch.setattr(project_module, "get_harness_optimizer", lambda: FailingOptimizer())
+    token = client.post("/auth/token", json={"username": "failing-optimizer"}).json()["access_token"]
+    response = client.post(
+        "/project/optimize",
+        json={"requirements": "billing api"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert "timeout" in detail and "provider_error" in detail
+
+
+def test_hosted_optimizer_applies_the_harness_budget(monkeypatch):
+    from src.harness import optimizer as optimizer_module
+
+    monkeypatch.setattr(optimizer_module.settings, "HARNESS_REASONING_EFFORT", "none")
+    monkeypatch.setattr(optimizer_module.settings, "MAX_REVISIONS", 5)
+    monkeypatch.setattr(optimizer_module.settings, "HARNESS_MAX_REVISIONS", 2)
+    monkeypatch.setattr(
+        optimizer_module, "get_llm", lambda **kwargs: ("llm", kwargs.get("reasoning_effort"))
+    )
+    captured = {}
+    monkeypatch.setattr(
+        optimizer_module, "build_harness_optimizer", lambda **kwargs: captured.update(kwargs)
+    )
+    optimizer_module.get_harness_optimizer.cache_clear()
+    try:
+        optimizer_module.get_harness_optimizer()
+    finally:
+        optimizer_module.get_harness_optimizer.cache_clear()
+    assert captured["llm"] == ("llm", "none")
+    assert captured["agent_llm_factory"]() == ("llm", "none")
+    assert captured["judge_llm"] == ("llm", "none")
+    assert captured["max_revisions"] == 2
+
+
+def test_optimize_over_the_call_budget_is_refused_before_any_call(monkeypatch):
+    def must_not_run():
+        raise AssertionError("the optimizer must not start")
+
+    monkeypatch.setattr(project_module, "get_harness_optimizer", must_not_run)
+    monkeypatch.setattr(settings, "HARNESS_CANDIDATES", 3)
+    monkeypatch.setattr(settings, "HARNESS_MAX_REVISIONS", 2)
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 5)
+    monkeypatch.setattr(settings, "HARNESS_MAX_MODEL_CALLS", 90)
+    token = client.post("/auth/token", json={"username": "budget"}).json()["access_token"]
+    response = client.post(
+        "/project/optimize",
+        json={"requirements": "billing api"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    # 3 candidates x 2 attempts x (3 rounds x (1 design + 3 audit) + 3 judge) + 1 propose
+    assert response.status_code == 403
+    assert "91 model calls" in response.json()["detail"]
+
+
+def test_optimize_at_exactly_the_call_budget_is_allowed(monkeypatch):
+    monkeypatch.setattr(project_module, "get_harness_optimizer", lambda: StubOptimizer())
+    monkeypatch.setattr(settings, "HARNESS_CANDIDATES", 3)
+    monkeypatch.setattr(settings, "HARNESS_MAX_REVISIONS", 2)
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 5)
+    monkeypatch.setattr(settings, "HARNESS_MAX_MODEL_CALLS", 91)
+    token = client.post("/auth/token", json={"username": "budget-edge"}).json()["access_token"]
+    response = client.post(
+        "/project/optimize",
+        json={"requirements": "billing api"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200

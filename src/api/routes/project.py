@@ -11,7 +11,12 @@ from src.core.config import settings
 from src.core.observability import get_langfuse_callbacks
 from src.core.security import get_current_user
 from src.db.locks import RunInProgress, exclusive_user_run
-from src.harness.optimizer import get_harness_optimizer, pick_winner
+from src.harness.optimizer import (
+    AllCandidatesFailed,
+    api_model_calls,
+    get_harness_optimizer,
+    pick_winner,
+)
 
 router = APIRouter(prefix="/project", tags=["project"])
 
@@ -72,8 +77,18 @@ async def design_project(
 async def optimize_project(
     req: OptimizeRequest, user_id: str = Depends(get_current_user)
 ) -> dict:
-    # One run fans out to dozens of LLM calls; allow one in flight per user,
-    # across all workers when Postgres is configured.
+    # One run fans out to dozens of LLM calls; refuse it when the worst case is
+    # over the harness budget, and allow one in flight per user, across all
+    # workers when Postgres is configured.
+    calls = api_model_calls()
+    if settings.HARNESS_MAX_MODEL_CALLS and calls > settings.HARNESS_MAX_MODEL_CALLS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"An optimization needs up to {calls} model calls, above "
+                f"HARNESS_MAX_MODEL_CALLS={settings.HARNESS_MAX_MODEL_CALLS}."
+            ),
+        )
     try:
         async with exclusive_user_run("optimize", user_id):
             optimizer = get_harness_optimizer()
@@ -84,6 +99,12 @@ async def optimize_project(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="An optimization is already running for this user.",
+        )
+    except AllCandidatesFailed as exc:
+        reasons = sorted({f.get("failure_reason") or "provider_error" for f in exc.failures})
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Every harness candidate failed ({', '.join(reasons)}); try again later.",
         )
     winner = pick_winner(result["probe_results"])
 

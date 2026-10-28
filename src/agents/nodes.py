@@ -91,7 +91,10 @@ def supervisor_node(state: ProjectState) -> dict:
     if not findings:
         return {"next_agent": "security"}
 
-    if is_approved(findings) or state.get("revision_count", 0) >= settings.MAX_REVISIONS:
+    limit = settings.MAX_REVISIONS
+    if state.get("max_revisions") is not None:
+        limit = max(0, min(state["max_revisions"], limit))
+    if is_approved(findings) or state.get("revision_count", 0) >= limit:
         return {"next_agent": "FINISH"}
 
     return {"next_agent": "designer"}

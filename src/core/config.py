@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     )
 
     OPENROUTER_API_KEY: str = ""
-    OPENROUTER_MODEL: str = "deepseek/deepseek-v4-flash"
+    OPENROUTER_MODEL: str = "deepseek/deepseek-v4.1-flash"
     OPENROUTER_FALLBACK_MODEL: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     # Model clients refuse any base URL that is not openrouter.ai. Set true only to
@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60
+    # Comma-separated token ids (jti) to refuse, e.g. a leaked service token.
+    # Every token carries one; service tokens print theirs when minted.
+    REVOKED_TOKEN_IDS: str = ""
     # Passwordless token minting for local testing only; off unless opted in.
     ENABLE_DEV_AUTH: bool = False
 
@@ -73,7 +76,7 @@ class Settings(BaseSettings):
     # Every model call goes through OpenRouter, opencode included: the model must be
     # "openrouter/<vendor>/<model>". The old default, opencode's own free provider,
     # bypassed OpenRouter.
-    OPENCODE_MODEL: str = "openrouter/deepseek/deepseek-v4-flash"
+    OPENCODE_MODEL: str = "openrouter/deepseek/deepseek-v4.1-flash"
     # A DEDICATED OpenRouter key for opencode builds only (create one with a small credit
     # limit at openrouter.ai/settings/keys). It is passed to the opencode process alone;
     # git and the tests never get it, and the main OPENROUTER_API_KEY never reaches the
