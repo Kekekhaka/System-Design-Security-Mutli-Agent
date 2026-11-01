@@ -74,12 +74,29 @@ def make_security_node(llm, system_prompt: str | None = None, retriever=None):
                 "api_spec": state.get("api_spec") or "",
             }
         )
+        history = list(state.get("blocking_history") or [])
+        history.append(result.get("blocking_count"))
         return {
             "security_findings": result["security_findings"],
             "revision_count": state.get("revision_count", 0) + 1,
+            "blocking_history": history,
         }
 
     return security_node
+
+
+def not_improving(history: list[int | None] | None) -> bool:
+    """True when the last revision left at least as many Critical + High findings.
+
+    Only two parsed rounds are compared: an unparsed report (None) says nothing
+    about the design, and a round with no blocking findings is not stuck.
+    """
+    if not history or len(history) < 2:
+        return False
+    previous, latest = history[-2], history[-1]
+    if previous is None or latest is None:
+        return False
+    return latest > 0 and latest >= previous
 
 
 def supervisor_node(state: ProjectState) -> dict:
@@ -96,5 +113,9 @@ def supervisor_node(state: ProjectState) -> dict:
         limit = max(0, min(state["max_revisions"], limit))
     if is_approved(findings) or state.get("revision_count", 0) >= limit:
         return {"next_agent": "FINISH"}
+    # A revision that did not reduce the blocking findings is unlikely to be
+    # rescued by the next one; stop and leave the rounds unspent.
+    if settings.STOP_WHEN_NOT_IMPROVING and not_improving(state.get("blocking_history")):
+        return {"next_agent": "FINISH", "stop_reason": "no_progress"}
 
     return {"next_agent": "designer"}

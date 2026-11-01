@@ -82,12 +82,77 @@ def test_security_audit_runs_scope_analyze_validate():
     assert llm.calls[3][0].content.startswith("You are the validation stage")
 
 
-def test_revision_cap_stops_the_loop():
+def test_revision_cap_stops_the_loop(monkeypatch):
+    monkeypatch.setattr(settings, "STOP_WHEN_NOT_IMPROVING", False)
     result, _ = run("billing api", [DESIGN_V1, *REJECT_ROUND])
 
     assert result["revision_count"] == settings.MAX_REVISIONS
     assert not is_approved(result["security_findings"])
     assert result["next_agent"] == "FINISH"
+    assert result["stop_reason"] is None
+
+
+def test_a_revision_that_fixes_nothing_ends_the_loop_early(monkeypatch):
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 5)
+    # The same Critical finding every round: round 2 is no better than round 1.
+    result, llm = run("billing api", [DESIGN_V1, *REJECT_ROUND])
+
+    assert result["revision_count"] == 2
+    assert result["blocking_history"] == [1, 1]
+    assert result["stop_reason"] == "no_progress"
+    assert not is_approved(result["security_findings"])
+    assert len(designer_calls(llm)) == 2
+
+
+def test_not_improving_compares_only_parsed_blocking_rounds():
+    from src.agents.nodes import not_improving
+
+    assert not not_improving([])
+    assert not not_improving([3])
+    assert not_improving([2, 2])
+    assert not_improving([1, 3])
+    assert not not_improving([3, 2])  # fewer blocking findings: keep going
+    assert not not_improving([0, 0])  # nothing blocking: the cap or approval decides
+    assert not not_improving([None, 2])  # unparsed report says nothing about the design
+    assert not not_improving([2, None])
+    assert not_improving([4, 2, 2])  # only the last two rounds count
+
+
+def test_supervisor_stops_on_no_progress_only_when_enabled(monkeypatch):
+    from src.agents.nodes import supervisor_node
+
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 5)
+    stuck = {
+        "architecture": "a",
+        "security_findings": "CHANGES REQUESTED\n1. [High] x",
+        "revision_count": 2,
+        "blocking_history": [1, 1],
+    }
+    assert supervisor_node(stuck) == {"next_agent": "FINISH", "stop_reason": "no_progress"}
+    improving = {**stuck, "blocking_history": [3, 1]}
+    assert supervisor_node(improving) == {"next_agent": "designer"}
+
+    monkeypatch.setattr(settings, "STOP_WHEN_NOT_IMPROVING", False)
+    assert supervisor_node(stuck) == {"next_agent": "designer"}
+
+
+def test_security_node_records_blocking_counts():
+    from src.agents.nodes import make_security_node
+
+    node = make_security_node(ScriptedLLM(REJECT_ROUND))
+    first = node({"architecture": "a", "api_spec": "s", "revision_count": 0})
+    assert first["blocking_history"] == [1]
+    second = node({"architecture": "a", "api_spec": "s", "revision_count": 1, **first})
+    assert second["blocking_history"] == [1, 1]
+
+
+def test_settings_repr_hides_secrets(monkeypatch):
+    for name in ("OPENROUTER_API_KEY", "JWT_SECRET", "HARNESS_HMAC_KEY",
+                 "OPENCODE_OPENROUTER_API_KEY", "DATABASE_URL", "LANGFUSE_SECRET_KEY"):
+        monkeypatch.setattr(settings, name, "sk-should-never-print")
+        assert name not in repr(settings)
+    assert "sk-should-never-print" not in repr(settings)
+    assert "MAX_REVISIONS" in repr(settings)
 
 
 def test_approval_check():

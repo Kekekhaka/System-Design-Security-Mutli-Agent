@@ -66,7 +66,12 @@ def inconsistency(report: SecurityReport) -> str | None:
 
 
 def is_blocking(report: SecurityReport) -> bool:
-    return any(finding.severity in BLOCKING_SEVERITIES for finding in report.findings)
+    return blocking_count(report) > 0
+
+
+def blocking_count(report: SecurityReport) -> int:
+    """Critical and High findings: the supervisor's measure of revision progress."""
+    return sum(finding.severity in BLOCKING_SEVERITIES for finding in report.findings)
 
 
 def render_report(report: SecurityReport, reject_reason: str | None = None) -> str:

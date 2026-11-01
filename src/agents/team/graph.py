@@ -108,6 +108,7 @@ class TeamState(TypedDict, total=False):
     api_spec: str | None
     security_findings: str | None
     revision_count: int
+    blocking_history: list[int | None]  # written by the shared security node
     # build
     build: bool
     repo: str | None

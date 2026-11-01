@@ -250,9 +250,15 @@ curl -N -X POST http://localhost:8000/project/design/stream \
 by the thread id `proj-{user_id}:{session_id}`.
 
 The response includes `final_architecture`, `api_spec`, `security_audit`,
-`approved` and `total_revisions`. For the payment example you should see the
-security agent flag the PCI-DSS violation, the designer switch to tokenization,
-and the second audit approve.
+`approved`, `total_revisions` and `stop_reason`. For the payment example you
+should see the security agent flag the PCI-DSS violation, the designer switch to
+tokenization, and the second audit approve.
+
+The loop runs until the audit approves or `MAX_REVISIONS` is reached, and it
+also stops early when a revision leaves at least as many Critical + High
+findings as the round before. That run ends unapproved with
+`stop_reason: "no_progress"`, saving the remaining rounds. Set
+`STOP_WHEN_NOT_IMPROVING=false` to always use every round.
 
 ## Deploying on a server
 
@@ -491,3 +497,6 @@ What a test on a real project (a Django student-card system) showed:
 - This folder sits inside OneDrive: `.env` (with your API key) syncs to the
   cloud. Move the project to a plain local folder (e.g. `C:\dev`) if that is a
   concern. `.env` is gitignored.
+
+pgrep -af retry.sh || nohup bash retry.sh > retry.log 2>&1 &
+tail -3 retry.log

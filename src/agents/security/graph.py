@@ -13,6 +13,7 @@ from src.agents.security.prompts import (
 )
 from src.agents.security.report import (
     SecurityReport,
+    blocking_count,
     inconsistency,
     render_report,
     render_unparsed,
@@ -29,6 +30,8 @@ class SecurityState(TypedDict):
     scope: str
     draft_findings: str
     security_findings: str
+    # Critical + High findings in the report; None when no report was parsed.
+    blocking_count: int | None
 
 
 def build_security_subgraph(llm, system_prompt: str | None = None, retriever=None):
@@ -109,11 +112,15 @@ def build_security_subgraph(llm, system_prompt: str | None = None, retriever=Non
                 else None
             )
             return {
-                "security_findings": render_unparsed(getattr(raw, "content", None), error)
+                "security_findings": render_unparsed(getattr(raw, "content", None), error),
+                "blocking_count": None,
             }
         # An inconsistent report (count or summary disagreeing with the list)
         # is never approved, but its listed findings are kept as feedback.
-        return {"security_findings": render_report(report, reject_reason=inconsistency(report))}
+        return {
+            "security_findings": render_report(report, reject_reason=inconsistency(report)),
+            "blocking_count": blocking_count(report),
+        }
 
     builder = StateGraph(SecurityState)
     builder.add_node("scope", scope_node)

@@ -1,4 +1,8 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Secrets stay out of repr(settings), which pytest prints in assertion failures.
+_SECRET = {"default": "", "repr": False}
 
 
 class Settings(BaseSettings):
@@ -6,7 +10,7 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = Field(**_SECRET)
     OPENROUTER_MODEL: str = "deepseek/deepseek-v4.1-flash"
     OPENROUTER_FALLBACK_MODEL: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
@@ -38,7 +42,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
 
     # No usable default: startup fails until a real secret is configured.
-    JWT_SECRET: str = ""
+    JWT_SECRET: str = Field(**_SECRET)
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60
     # Comma-separated token ids (jti) to refuse, e.g. a leaked service token.
@@ -48,6 +52,9 @@ class Settings(BaseSettings):
     ENABLE_DEV_AUTH: bool = False
 
     MAX_REVISIONS: int = 5
+    # End the design loop early when a revision leaves at least as many
+    # Critical + High findings as the round before (saves the remaining rounds).
+    STOP_WHEN_NOT_IMPROVING: bool = True
     # Non-streaming /project/design gives up after this; long runs use the stream.
     DESIGN_TIMEOUT_SECONDS: int = 120
 
@@ -64,7 +71,7 @@ class Settings(BaseSettings):
     # Opt in to the promoted champion persona in the team's audits.
     HARNESS_USE_CHAMPION: bool = False
     # HMAC key for the persona store and run history (empty = unsigned store).
-    HARNESS_HMAC_KEY: str = ""
+    HARNESS_HMAC_KEY: str = Field(**_SECRET)
     # Hard per-run model-call cap. 0 means "estimate + 2".
     HARNESS_MAX_MODEL_CALLS: int = 0
     # Fixture calls spent proving the baseline auditor still works (2 fixtures).
@@ -81,7 +88,7 @@ class Settings(BaseSettings):
     # limit at openrouter.ai/settings/keys). It is passed to the opencode process alone;
     # git and the tests never get it, and the main OPENROUTER_API_KEY never reaches the
     # build. It must differ from OPENROUTER_API_KEY. Builds refuse to start without it.
-    OPENCODE_OPENROUTER_API_KEY: str = ""
+    OPENCODE_OPENROUTER_API_KEY: str = Field(**_SECRET)
     ENGINEER_TIMEOUT_SECONDS: int = 1800
     TEAM_TEST_COMMAND: str = "python -m pytest -q"
     TEAM_TEST_TIMEOUT_SECONDS: int = 900
@@ -108,12 +115,12 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: str = "*"
 
-    DATABASE_URL: str = ""
+    DATABASE_URL: str = Field(**_SECRET)  # carries the database password
     # Refuse to start without DATABASE_URL instead of falling back to memory.
     REQUIRE_DATABASE: bool = False
 
     LANGFUSE_PUBLIC_KEY: str = ""
-    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = Field(**_SECRET)
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
 
 

@@ -70,6 +70,7 @@ async def design_project(
         "api_spec": result.get("api_spec"),
         "security_audit": result.get("security_findings"),
         "total_revisions": result.get("revision_count"),
+        "stop_reason": result.get("stop_reason"),
     }
 
 
@@ -186,6 +187,7 @@ async def design_stream(
                     "api_spec": final_state.get("api_spec"),
                     "security_audit": final_state.get("security_findings"),
                     "total_revisions": final_state.get("revision_count"),
+                    "stop_reason": final_state.get("stop_reason"),
                 },
             )
         else:

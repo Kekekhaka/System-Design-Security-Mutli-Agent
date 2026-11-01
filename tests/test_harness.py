@@ -124,11 +124,9 @@ def test_lenient_persona_cannot_win_by_approving_a_weak_design(monkeypatch):
     result = asyncio.run(optimizer_for(monkeypatch, [strict, redteam, lenient]).ainvoke({"task": "billing api"}))
 
     assert result["winning_prompt"] == CANDIDATES[1]
-    assert [probe["revisions"] for probe in result["probe_results"]] == [
-        settings.MAX_REVISIONS,
-        2,
-        1,
-    ]
+    # strict repeats the same Critical finding, so its loop stops on no progress
+    # after round 2 instead of spending every round up to MAX_REVISIONS.
+    assert [probe["revisions"] for probe in result["probe_results"]] == [2, 2, 1]
     assert [probe["approved"] for probe in result["probe_results"]] == [False, True, False]
     assert any(
         call[0].content == with_review_emphasis(CANDIDATES[0]) for call in strict.calls
