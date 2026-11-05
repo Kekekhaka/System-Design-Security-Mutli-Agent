@@ -146,6 +146,69 @@ def test_security_node_records_blocking_counts():
     assert second["blocking_history"] == [1, 1]
 
 
+class UnmetBriefLLM(ScriptedLLM):
+    """The validator reports that a required capability is missing."""
+
+    def with_structured_output(self, schema, **kwargs):
+        from src.agents.security.report import REQUIREMENT_CATEGORY, Finding, SecurityReport
+        from tests.fakes import StructuredFake
+
+        finding = Finding(
+            severity="High",
+            category=REQUIREMENT_CATEGORY,
+            location='"support refunds"',
+            problem="No refund endpoint.",
+            impact="The brief is not met.",
+            fix="Add refunds.",
+        )
+        report = SecurityReport(summary="Missing.", findings=[finding], finding_count=1)
+        return StructuredFake(self, lambda _: report, kwargs.get("include_raw", False))
+
+
+def test_audit_receives_the_brief_and_marks_it_verified():
+    result, llm = run("billing api with refunds", [DESIGN_V2, *APPROVE_ROUND])
+
+    assert is_approved(result["security_findings"])
+    assert result["brief_verified"] is True
+    analyze_prompt, validate_prompt = llm.calls[2][1].content, llm.calls[3][1].content
+    for prompt in (analyze_prompt, validate_prompt):
+        assert "billing api with refunds" in prompt
+        assert "untrusted data" in prompt
+    assert "Requirement not met" in analyze_prompt
+
+
+def test_missing_capability_blocks_approval_and_verification():
+    from src.agents.nodes import make_security_node
+
+    node = make_security_node(UnmetBriefLLM(["scope", "draft", "validator"]))
+    result = node(
+        {"requirements": "support refunds", "architecture": "a", "api_spec": "s", "revision_count": 0}
+    )
+
+    assert not is_approved(result["security_findings"])
+    assert result["brief_verified"] is False
+    assert "Requirement not met" in result["security_findings"]
+
+
+def test_audit_without_a_brief_is_never_marked_verified():
+    from src.agents.nodes import make_security_node
+
+    llm = ScriptedLLM(APPROVE_ROUND)
+    result = make_security_node(llm)({"architecture": "a", "api_spec": "s", "revision_count": 0})
+
+    assert is_approved(result["security_findings"])
+    assert result["brief_verified"] is False
+    assert "Original requirements" not in llm.calls[1][1].content
+    assert "Requirement not met" not in llm.calls[1][1].content
+
+
+def test_a_new_revision_clears_the_verified_flag():
+    from src.agents.nodes import make_designer_node
+
+    update = make_designer_node(ScriptedLLM([DESIGN_V2]))({"requirements": "x", "brief_verified": True})
+    assert update["brief_verified"] is False
+
+
 def test_settings_repr_hides_secrets(monkeypatch):
     for name in ("OPENROUTER_API_KEY", "JWT_SECRET", "HARNESS_HMAC_KEY",
                  "OPENCODE_OPENROUTER_API_KEY", "DATABASE_URL", "LANGFUSE_SECRET_KEY"):

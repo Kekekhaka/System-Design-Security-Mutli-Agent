@@ -250,9 +250,15 @@ curl -N -X POST http://localhost:8000/project/design/stream \
 by the thread id `proj-{user_id}:{session_id}`.
 
 The response includes `final_architecture`, `api_spec`, `security_audit`,
-`approved`, `total_revisions` and `stop_reason`. For the payment example you
-should see the security agent flag the PCI-DSS violation, the designer switch to
-tokenization, and the second audit approve.
+`approved`, `verified_against_brief`, `total_revisions` and `stop_reason`. For the
+payment example you should see the security agent flag the PCI-DSS violation, the
+designer switch to tokenization, and the second audit approve.
+
+`approved` means the audit left no Critical or High findings. The audit also sees
+the original brief, and a capability the brief explicitly requires but the design
+lacks is a High "Requirement not met" finding. `verified_against_brief` is true
+when the latest audit had the brief and listed no such finding. It is the auditor
+model's judgement, not a test, so still read the design against your brief.
 
 The loop runs until the audit approves or `MAX_REVISIONS` is reached, and it
 also stops early when a revision leaves at least as many Critical + High
@@ -497,6 +503,7 @@ What a test on a real project (a Django student-card system) showed:
 - This folder sits inside OneDrive: `.env` (with your API key) syncs to the
   cloud. Move the project to a plain local folder (e.g. `C:\dev`) if that is a
   concern. `.env` is gitignored.
+
 
 pgrep -af retry.sh || nohup bash retry.sh > retry.log 2>&1 &
 tail -3 retry.log

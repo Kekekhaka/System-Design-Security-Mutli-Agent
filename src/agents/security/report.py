@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 BLOCKING_SEVERITIES = {"Critical", "High"}
 MAX_RAW_EXCERPT = 2000
+REQUIREMENT_CATEGORY = "Requirement not met"
 
 
 class Finding(BaseModel):
@@ -63,6 +64,14 @@ def inconsistency(report: SecurityReport) -> str | None:
     if claimed > listed:
         return f"summary claims {claimed} validated findings but {listed} were listed"
     return None
+
+
+def meets_brief(report: SecurityReport) -> bool:
+    """False when the audit listed a capability the brief required but the design lacks."""
+    return not any(
+        finding.category.strip().lower().startswith(REQUIREMENT_CATEGORY.lower())
+        for finding in report.findings
+    )
 
 
 def is_blocking(report: SecurityReport) -> bool:

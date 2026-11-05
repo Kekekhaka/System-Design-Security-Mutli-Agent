@@ -15,4 +15,6 @@ class ProjectState(TypedDict):
     blocking_history: list[int | None]
     # Why the loop ended early: "no_progress", or None.
     stop_reason: str | None
+    # The latest audit had the brief and found no required capability missing.
+    brief_verified: bool
     next_agent: Literal["designer", "security", "FINISH"]

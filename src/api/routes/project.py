@@ -66,6 +66,7 @@ async def design_project(
     return {
         "status": "success",
         "approved": is_approved(result.get("security_findings")),
+        "verified_against_brief": bool(result.get("brief_verified")),
         "final_architecture": result.get("architecture"),
         "api_spec": result.get("api_spec"),
         "security_audit": result.get("security_findings"),
@@ -113,6 +114,7 @@ async def optimize_project(
         "status": "success",
         "winning_prompt": result["winning_prompt"],
         "approved": winner["approved"],
+        "verified_against_brief": bool(winner.get("brief_verified")),
         "final_architecture": winner["architecture"],
         "api_spec": winner["api_spec"],
         "security_audit": winner["findings"],
@@ -183,6 +185,7 @@ async def design_stream(
                 "final",
                 {
                     "approved": is_approved(final_state.get("security_findings")),
+                    "verified_against_brief": bool(final_state.get("brief_verified")),
                     "final_architecture": final_state.get("architecture"),
                     "api_spec": final_state.get("api_spec"),
                     "security_audit": final_state.get("security_findings"),

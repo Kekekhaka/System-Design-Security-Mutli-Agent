@@ -15,6 +15,7 @@ from src.agents.security.report import (
     SecurityReport,
     blocking_count,
     inconsistency,
+    meets_brief,
     render_report,
     render_unparsed,
 )
@@ -24,6 +25,8 @@ from src.knowledge.retriever import format_references
 
 
 class SecurityState(TypedDict):
+    # The original brief, when there is one; also checked against the design.
+    requirements: str
     architecture: str
     api_spec: str
     references: str
@@ -32,6 +35,9 @@ class SecurityState(TypedDict):
     security_findings: str
     # Critical + High findings in the report; None when no report was parsed.
     blocking_count: int | None
+    # True only when the audit had the brief, returned a sound report and found
+    # no required capability missing.
+    brief_verified: bool
 
 
 def build_security_subgraph(llm, system_prompt: str | None = None, retriever=None):
@@ -77,6 +83,7 @@ def build_security_subgraph(llm, system_prompt: str | None = None, retriever=Non
                         state.get("api_spec"),
                         state.get("scope", ""),
                         state.get("references", ""),
+                        state.get("requirements") or "",
                     )
                 ),
             ],
@@ -98,6 +105,7 @@ def build_security_subgraph(llm, system_prompt: str | None = None, retriever=Non
                     state.get("architecture"),
                     state.get("api_spec"),
                     state.get("draft_findings", ""),
+                    state.get("requirements") or "",
                 )
             ),
         ]
@@ -114,12 +122,17 @@ def build_security_subgraph(llm, system_prompt: str | None = None, retriever=Non
             return {
                 "security_findings": render_unparsed(getattr(raw, "content", None), error),
                 "blocking_count": None,
+                "brief_verified": False,
             }
         # An inconsistent report (count or summary disagreeing with the list)
         # is never approved, but its listed findings are kept as feedback.
+        reject_reason = inconsistency(report)
         return {
-            "security_findings": render_report(report, reject_reason=inconsistency(report)),
+            "security_findings": render_report(report, reject_reason=reject_reason),
             "blocking_count": blocking_count(report),
+            "brief_verified": bool(state.get("requirements"))
+            and reject_reason is None
+            and meets_brief(report),
         }
 
     builder = StateGraph(SecurityState)

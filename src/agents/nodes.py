@@ -57,6 +57,7 @@ def make_designer_node(llm, retriever=None):
             "architecture": architecture,
             "api_spec": api_spec,
             "security_findings": None,
+            "brief_verified": False,  # this revision has not been audited yet
         }
 
     return designer_node
@@ -70,6 +71,7 @@ def make_security_node(llm, system_prompt: str | None = None, retriever=None):
     def security_node(state: ProjectState) -> dict:
         result = subgraph.invoke(
             {
+                "requirements": state.get("requirements") or "",
                 "architecture": state.get("architecture") or "",
                 "api_spec": state.get("api_spec") or "",
             }
@@ -80,6 +82,7 @@ def make_security_node(llm, system_prompt: str | None = None, retriever=None):
             "security_findings": result["security_findings"],
             "revision_count": state.get("revision_count", 0) + 1,
             "blocking_history": history,
+            "brief_verified": bool(result.get("brief_verified")),
         }
 
     return security_node

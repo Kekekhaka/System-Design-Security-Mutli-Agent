@@ -109,6 +109,7 @@ class TeamState(TypedDict, total=False):
     security_findings: str | None
     revision_count: int
     blocking_history: list[int | None]  # written by the shared security node
+    brief_verified: bool  # likewise
     # build
     build: bool
     repo: str | None

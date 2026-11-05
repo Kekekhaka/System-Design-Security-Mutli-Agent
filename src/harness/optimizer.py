@@ -168,7 +168,11 @@ def make_probe_node(agent_llm_factory, judge, max_revisions: int | None = None):
                     architecture = final_state.get("architecture") or ""
                     api_spec = final_state.get("api_spec") or ""
                     verdict = await judge.ainvoke(
-                        {"architecture": architecture, "api_spec": api_spec}
+                        {
+                            "requirements": state["task"],
+                            "architecture": architecture,
+                            "api_spec": api_spec,
+                        }
                     )
                     findings = verdict["security_findings"]
                     approved = is_approved(findings)
@@ -185,6 +189,7 @@ def make_probe_node(agent_llm_factory, judge, max_revisions: int | None = None):
                         "prompt": persona["prompt"],
                         "revisions": final_state.get("revision_count", 0),
                         "approved": approved,
+                        "brief_verified": bool(verdict.get("brief_verified")),
                         "weighted": weighted_findings(findings),
                         "findings_length": len(findings or ""),
                         "architecture": architecture,

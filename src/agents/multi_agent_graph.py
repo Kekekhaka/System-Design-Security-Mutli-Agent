@@ -74,4 +74,5 @@ def initial_state(requirements: str, max_revisions: int | None = None) -> dict:
         "max_revisions": max_revisions,
         "blocking_history": [],
         "stop_reason": None,
+        "brief_verified": False,
     }
