@@ -128,17 +128,18 @@ def _finish_unapproved(state: ProjectState, **update) -> dict:
 
 
 def not_improving(history: list[int | None] | None) -> bool:
-    """True when the last revision left at least as many Critical + High findings.
+    """True when the last two revisions each left at least as many Critical + High findings.
 
-    Only two parsed rounds are compared: an unparsed report (None) says nothing
-    about the design, and a round with no blocking findings is not stuck.
+    One bad round is not enough: audits vary, and live runs improved after one
+    (2, 0, 5, 3). An unparsed report (None) says nothing about the design, and a
+    round with no blocking findings is not stuck.
     """
-    if not history or len(history) < 2:
+    if not history or len(history) < 3:
         return False
-    previous, latest = history[-2], history[-1]
-    if previous is None or latest is None:
+    first, middle, latest = history[-3:]
+    if first is None or middle is None or latest is None:
         return False
-    return latest > 0 and latest >= previous
+    return latest > 0 and middle >= first and latest >= middle
 
 
 def supervisor_node(state: ProjectState) -> dict:
@@ -157,8 +158,8 @@ def supervisor_node(state: ProjectState) -> dict:
         return {"next_agent": "FINISH"}
     if state.get("revision_count", 0) >= limit:
         return _finish_unapproved(state)
-    # A revision that did not reduce the blocking findings is unlikely to be
-    # rescued by the next one; stop and leave the rounds unspent.
+    # Two revisions in a row that did not reduce the blocking findings are
+    # unlikely to be rescued by the next; stop and leave the rounds unspent.
     if settings.STOP_WHEN_NOT_IMPROVING and not_improving(state.get("blocking_history")):
         return _finish_unapproved(state, stop_reason="no_progress")
 

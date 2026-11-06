@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     ENABLE_DEV_AUTH: bool = False
 
     MAX_REVISIONS: int = 5
-    # End the design loop early when a revision leaves at least as many
-    # Critical + High findings as the round before (saves the remaining rounds).
+    # End the design loop early when two revisions in a row each leave at least as
+    # many Critical + High findings as the round before (saves the remaining rounds).
     STOP_WHEN_NOT_IMPROVING: bool = True
     # Non-streaming /project/design gives up after this; long runs use the stream.
     DESIGN_TIMEOUT_SECONDS: int = 120

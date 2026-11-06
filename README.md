@@ -257,14 +257,17 @@ designer switch to tokenization, and the second audit approve.
 
 `approved` means the audit left no Critical or High findings. The audit also sees
 the original brief, and a capability the brief explicitly requires but the design
-lacks is a High "Requirement not met" finding. `verified_against_brief` is true
-when the latest audit had the brief and listed no such finding. It is the auditor
-model's judgement, not a test, so still read the design against your brief.
+lacks is a High "Requirement not met" finding. That finding must quote the brief;
+code checks the quote, and one that does not appear there drops to Medium.
+`verified_against_brief` is true when the latest audit had the brief and listed no
+such blocking finding. It is the auditor model's judgement, not a test, so still
+read the design against your brief.
 
 The loop runs until the audit approves or `MAX_REVISIONS` is reached, and it
-also stops early when a revision leaves at least as many Critical + High
-findings as the round before. That run ends unapproved with
-`stop_reason: "no_progress"`, saving the remaining rounds. Set
+also stops early when two revisions in a row each leave at least as many Critical
++ High findings as the round before. That takes three audits, so it can only save
+rounds when `MAX_REVISIONS` is 4 or more. The run ends unapproved with
+`stop_reason: "no_progress"`. Set
 `STOP_WHEN_NOT_IMPROVING=false` to always use every round. A run that ends
 unapproved returns the audited round with the fewest Critical + High findings
 (the latest on a tie), not simply the last; `selected_round` says which. A report

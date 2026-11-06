@@ -94,14 +94,14 @@ def test_revision_cap_stops_the_loop(monkeypatch):
 
 def test_a_revision_that_fixes_nothing_ends_the_loop_early(monkeypatch):
     monkeypatch.setattr(settings, "MAX_REVISIONS", 5)
-    # The same Critical finding every round: round 2 is no better than round 1.
+    # The same Critical finding every round: rounds 2 and 3 are no better.
     result, llm = run("billing api", [DESIGN_V1, *REJECT_ROUND])
 
-    assert result["revision_count"] == 2
-    assert result["blocking_history"] == [1, 1]
+    assert result["revision_count"] == 3
+    assert result["blocking_history"] == [1, 1, 1]
     assert result["stop_reason"] == "no_progress"
     assert not is_approved(result["security_findings"])
-    assert len(designer_calls(llm)) == 2
+    assert len(designer_calls(llm)) == 3
 
 
 def test_not_improving_compares_only_parsed_blocking_rounds():
@@ -109,13 +109,17 @@ def test_not_improving_compares_only_parsed_blocking_rounds():
 
     assert not not_improving([])
     assert not not_improving([3])
-    assert not_improving([2, 2])
-    assert not_improving([1, 3])
-    assert not not_improving([3, 2])  # fewer blocking findings: keep going
-    assert not not_improving([0, 0])  # nothing blocking: the cap or approval decides
-    assert not not_improving([None, 2])  # unparsed report says nothing about the design
-    assert not not_improving([2, None])
-    assert not_improving([4, 2, 2])  # only the last two rounds count
+    assert not not_improving([2, 2])  # one bad round is not enough
+    assert not not_improving([6, 10])
+    assert not_improving([2, 2, 2])
+    assert not_improving([1, 3, 3])
+    assert not not_improving([6, 10, 8])  # the latest round improved: keep going
+    assert not not_improving([2, 0, 5])  # seen live; the next round improved
+    assert not not_improving([0, 0, 0])  # nothing blocking: the cap or approval decides
+    assert not not_improving([None, 2, 2])  # unparsed report says nothing about the design
+    assert not not_improving([2, None, 2])
+    assert not not_improving([2, 2, None])
+    assert not_improving([9, 4, 2, 2, 2])  # only the last three rounds count
 
 
 def test_supervisor_stops_on_no_progress_only_when_enabled(monkeypatch):
@@ -125,11 +129,11 @@ def test_supervisor_stops_on_no_progress_only_when_enabled(monkeypatch):
     stuck = {
         "architecture": "a",
         "security_findings": "CHANGES REQUESTED\n1. [High] x",
-        "revision_count": 2,
-        "blocking_history": [1, 1],
+        "revision_count": 3,
+        "blocking_history": [1, 1, 1],
     }
     assert supervisor_node(stuck) == {"next_agent": "FINISH", "stop_reason": "no_progress"}
-    improving = {**stuck, "blocking_history": [3, 1]}
+    improving = {**stuck, "blocking_history": [3, 3, 1]}
     assert supervisor_node(improving) == {"next_agent": "designer"}
 
     monkeypatch.setattr(settings, "STOP_WHEN_NOT_IMPROVING", False)
@@ -149,6 +153,8 @@ def test_security_node_records_blocking_counts():
 class UnmetBriefLLM(ScriptedLLM):
     """The validator reports that a required capability is missing."""
 
+    quote = "Support   REFUNDS"  # matched ignoring case and spacing
+
     def with_structured_output(self, schema, **kwargs):
         from src.agents.security.report import REQUIREMENT_CATEGORY, Finding, SecurityReport
         from tests.fakes import StructuredFake
@@ -156,10 +162,11 @@ class UnmetBriefLLM(ScriptedLLM):
         finding = Finding(
             severity="High",
             category=REQUIREMENT_CATEGORY,
-            location='"support refunds"',
+            location="API spec",
             problem="No refund endpoint.",
             impact="The brief is not met.",
             fix="Add refunds.",
+            requirement_quote=self.quote,
         )
         report = SecurityReport(summary="Missing.", findings=[finding], finding_count=1)
         return StructuredFake(self, lambda _: report, kwargs.get("include_raw", False))
@@ -188,6 +195,25 @@ def test_missing_capability_blocks_approval_and_verification():
     assert not is_approved(result["security_findings"])
     assert result["brief_verified"] is False
     assert "Requirement not met" in result["security_findings"]
+
+
+def test_requirement_finding_that_does_not_quote_the_brief_does_not_block():
+    from src.agents.nodes import make_security_node
+
+    for bad_quote in ("", "NFR5", "refunds", "audit every read of patient data"):
+
+        class Unquoted(UnmetBriefLLM):
+            quote = bad_quote
+
+        result = make_security_node(Unquoted(["scope", "draft", "validator"]))(
+            {"requirements": "support refunds", "architecture": "a", "api_spec": "s", "revision_count": 0}
+        )
+
+        assert is_approved(result["security_findings"]), bad_quote
+        assert result["blocking_history"] == [0]
+        assert result["brief_verified"] is True
+        assert "[Medium] Requirement not met" in result["security_findings"]
+        assert "Not quoted from the brief" in result["security_findings"]
 
 
 def test_audit_without_a_brief_is_never_marked_verified():
@@ -304,13 +330,20 @@ def test_unapproved_run_returns_the_round_with_fewest_blocking_findings(monkeypa
 def test_a_stopped_run_also_returns_its_best_round(monkeypatch):
     monkeypatch.setattr(settings, "MAX_REVISIONS", 5)
     design = lambda n: f"===ARCHITECTURE===\nArchitecture v{n}\n===API SPEC===\nspec v{n}"
-    responses = [design(1), "s", "d", "v", design(2), "s", "d", "v", design(3), "s", "d", "v"]
+    responses = [design(n) if step == 0 else "x" for n in (1, 2, 3, 4) for step in range(4)]
     llm = ReportSequenceLLM(
-        responses, [_report(("High", "High")), _report(("High",)), _report(("High", "High"))]
+        responses,
+        [
+            _report(("High", "High")),
+            _report(("High",)),
+            _report(("High", "High")),
+            _report(("High", "High")),
+        ],
     )
 
     result = build_multi_agent(llm=llm).invoke(initial_state("billing api"))
 
+    assert result["blocking_history"] == [2, 1, 2, 2]
     assert result["stop_reason"] == "no_progress"
     assert result["selected_round"] == 2
     assert "v2" in result["architecture"]

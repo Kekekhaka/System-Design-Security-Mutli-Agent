@@ -14,6 +14,7 @@ from src.agents.security.prompts import (
 from src.agents.security.report import (
     SecurityReport,
     blocking_count,
+    ground_requirement_findings,
     inconsistency,
     meets_brief,
     render_report,
@@ -140,6 +141,7 @@ def build_security_subgraph(llm, system_prompt: str | None = None, retriever=Non
             if isinstance(retried, SecurityReport):
                 report = retried
                 reject_reason = inconsistency(report)
+        report = ground_requirement_findings(report, state.get("requirements") or "")
         # A report that stays inconsistent is never approved, but its listed
         # findings are kept as feedback. Its count is not trusted as a measure.
         return {

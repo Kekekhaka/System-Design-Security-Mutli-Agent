@@ -26,6 +26,13 @@ class Finding(BaseModel):
     problem: str
     impact: str = Field(description="Why it matters")
     fix: str = Field(description="The concrete remediation")
+    requirement_quote: str = Field(
+        default="",
+        description=(
+            f'Only for "{REQUIREMENT_CATEGORY}" findings: the exact words of the '
+            "original requirements that this finding is about"
+        ),
+    )
 
 
 class SecurityReport(BaseModel):
@@ -66,6 +73,37 @@ def inconsistency(report: SecurityReport) -> str | None:
     return None
 
 
+def _is_requirement_finding(finding: Finding) -> bool:
+    return finding.category.strip().lower().startswith(REQUIREMENT_CATEGORY.lower())
+
+
+def _normalized(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def ground_requirement_findings(report: SecurityReport, requirements: str) -> SecurityReport:
+    """Stop a requirement finding blocking unless it quotes the original brief.
+
+    Seen live: High findings citing labels the design wrote for itself (FR3, NFR5),
+    despite the prompt forbidding it. A quote of at least two words must appear in
+    the brief; otherwise the finding stays as feedback at Medium severity.
+    """
+    brief = _normalized(requirements)
+    findings = []
+    for finding in report.findings:
+        quote = _normalized(finding.requirement_quote)
+        grounded = len(quote.split()) >= 2 and quote in brief
+        if _is_requirement_finding(finding) and finding.severity in BLOCKING_SEVERITIES and not grounded:
+            finding = finding.model_copy(
+                update={
+                    "severity": "Medium",
+                    "problem": f"{finding.problem} (Not quoted from the brief, so not blocking.)",
+                }
+            )
+        findings.append(finding)
+    return report.model_copy(update={"findings": findings})
+
+
 def meets_brief(report: SecurityReport) -> bool:
     """False when the audit listed a required capability as missing, at blocking severity.
 
@@ -73,8 +111,7 @@ def meets_brief(report: SecurityReport) -> bool:
     labels rather than the brief, so lower severities do not count.
     """
     return not any(
-        finding.severity in BLOCKING_SEVERITIES
-        and finding.category.strip().lower().startswith(REQUIREMENT_CATEGORY.lower())
+        finding.severity in BLOCKING_SEVERITIES and _is_requirement_finding(finding)
         for finding in report.findings
     )
 
@@ -98,8 +135,10 @@ def render_report(report: SecurityReport, reject_reason: str | None = None) -> s
     if report.summary.strip():
         lines.append(report.summary.strip())
     for index, finding in enumerate(report.findings, 1):
+        required = f"   Requirement: {finding.requirement_quote}\n" if finding.requirement_quote else ""
         lines.append(
             f"{index}. [{finding.severity}] {finding.category} - {finding.location}\n"
+            f"{required}"
             f"   Problem: {finding.problem}\n"
             f"   Why it matters: {finding.impact}\n"
             f"   Fix: {finding.fix}"
