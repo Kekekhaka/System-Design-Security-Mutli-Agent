@@ -356,6 +356,62 @@ def test_an_approved_run_keeps_its_last_round():
     assert "v2" in result["architecture"]
 
 
+class StallingLLM(ScriptedLLM):
+    """Raises a timeout on the listed call numbers (1-based), then answers normally."""
+
+    def __init__(self, responses, stall_on):
+        super().__init__(responses)
+        self.stall_on = set(stall_on)
+        self.attempts = 0
+
+    def invoke(self, messages, **kwargs):
+        from src.core.llm import ModelCallTimeout
+
+        self.attempts += 1
+        if self.attempts in self.stall_on:
+            raise ModelCallTimeout("stalled")
+        return super().invoke(messages, **kwargs)
+
+
+def test_a_stalled_designer_call_is_run_again_and_keeps_earlier_rounds():
+    # Attempt 5 is round 2's design: rounds 1 and 2 still both count.
+    llm = StallingLLM([DESIGN_V1, *REJECT_ROUND, DESIGN_V2, *APPROVE_ROUND], stall_on=[5])
+
+    result = build_multi_agent(llm=llm).invoke(initial_state("billing api"))
+
+    assert is_approved(result["security_findings"])
+    assert "v2" in result["architecture"]
+    assert result["revision_count"] == 2
+    assert result["blocking_history"] == [1, 0]
+
+
+def test_a_stalled_audit_does_not_count_as_an_extra_round():
+    # Attempt 3 is round 1's analysis; the whole audit runs again. A stalled attempt
+    # consumes no scripted reply, so the rerun starts with a second scope reply.
+    llm = StallingLLM(
+        [DESIGN_V2, SCOPE_NOTES, SCOPE_NOTES, DRAFT_APPROVE, SECURITY_APPROVE],
+        stall_on=[3],
+    )
+
+    result = build_multi_agent(llm=llm).invoke(initial_state("billing api"))
+
+    assert is_approved(result["security_findings"])
+    assert result["revision_count"] == 1
+    assert result["blocking_history"] == [0]
+
+
+def test_a_second_stall_in_the_same_stage_ends_the_run():
+    import pytest
+
+    from src.core.llm import ModelCallTimeout
+
+    llm = StallingLLM([DESIGN_V1], stall_on=[1, 2])
+
+    with pytest.raises(ModelCallTimeout):
+        build_multi_agent(llm=llm).invoke(initial_state("billing api"))
+    assert llm.attempts == 2
+
+
 def test_settings_repr_hides_secrets(monkeypatch):
     for name in ("OPENROUTER_API_KEY", "JWT_SECRET", "HARNESS_HMAC_KEY",
                  "OPENCODE_OPENROUTER_API_KEY", "DATABASE_URL", "LANGFUSE_SECRET_KEY"):

@@ -304,7 +304,8 @@ def api_model_calls() -> int:
 
     Per candidate attempt: every round is a design plus a 4-call audit, then
     the judge's 4-call audit; a failed candidate is retried once. Plus one
-    propose call. (Retries of an empty reply inside a call are not counted.)
+    propose call. (Retries of an empty reply inside a call, and a stage run again
+    after a stalled call, are not counted.)
     """
     rounds = harness_max_revisions() + 1
     attempt = rounds * (1 + SECURITY_AUDIT_CALLS) + SECURITY_AUDIT_CALLS

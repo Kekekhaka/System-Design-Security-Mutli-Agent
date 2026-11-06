@@ -4,7 +4,12 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from src.agents.multi_agent_state import ProjectState
-from src.agents.nodes import make_designer_node, make_security_node, supervisor_node
+from src.agents.nodes import (
+    make_designer_node,
+    make_security_node,
+    retry_stage_on_timeout,
+    supervisor_node,
+)
 from src.core.config import settings
 from src.core.llm import get_llm
 from src.knowledge.retriever import load_default_retriever, load_design_retriever
@@ -34,11 +39,19 @@ def build_multi_agent(
 
     builder = StateGraph(ProjectState)
     builder.add_node("supervisor", supervisor_node)
-    builder.add_node("designer", make_designer_node(llm, retriever=design_retriever))
+    builder.add_node(
+        "designer",
+        retry_stage_on_timeout(
+            "designer", make_designer_node(llm, retriever=design_retriever)
+        ),
+    )
     builder.add_node(
         "security",
-        make_security_node(
-            llm, system_prompt=security_prompt, retriever=security_retriever
+        retry_stage_on_timeout(
+            "security",
+            make_security_node(
+                llm, system_prompt=security_prompt, retriever=security_retriever
+            ),
         ),
     )
 

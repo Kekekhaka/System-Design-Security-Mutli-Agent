@@ -45,7 +45,8 @@ failover on rate limits or provider outages; startup logs a warning while it is
 unset. `LLM_CALL_TIMEOUT_SECONDS` (default 1200) is a hard deadline on every model call: a
 provider that keeps a connection alive can stall a request indefinitely (a call was
 seen pending for six hours), so a call that overruns fails with `ModelCallTimeout`
-instead of hanging, and is not retried. `LLM_MAX_TOKENS` (default 32000) is the per-call output budget,
+instead of hanging. A design or audit stage is run again once after a timeout; a second
+timeout ends the run. `LLM_MAX_TOKENS` (default 32000) is the per-call output budget,
 reasoning included: DeepSeek V4 Flash can reason through a small budget and
 return no text. Any stage that returns empty or truncated output raises
 `ModelOutputError` instead of being treated as "no findings" or a blank design.

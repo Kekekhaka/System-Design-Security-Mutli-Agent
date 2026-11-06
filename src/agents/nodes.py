@@ -1,11 +1,15 @@
+import logging
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.agents.multi_agent_state import ProjectState
 from src.agents.prompts import DESIGNER_SYSTEM_PROMPT, build_designer_prompt
 from src.agents.security.graph import build_security_subgraph
 from src.core.config import settings
-from src.core.llm import invoke_checked
+from src.core.llm import ModelCallTimeout, invoke_checked
 from src.knowledge.retriever import format_references
+
+logger = logging.getLogger(__name__)
 
 ARCHITECTURE_MARKER = "===ARCHITECTURE==="
 API_SPEC_MARKER = "===API SPEC==="
@@ -99,6 +103,24 @@ def make_security_node(llm, system_prompt: str | None = None, retriever=None):
         }
 
     return security_node
+
+
+def retry_stage_on_timeout(stage: str, node):
+    """Run a stage again, once, if a model call in it stalls past its deadline.
+
+    Seen live: a designer call with no answer after 20 minutes ended the run and lost
+    its finished rounds. A failed stage has changed no state, so running it again is
+    safe; a second timeout is raised as before.
+    """
+
+    def wrapped(state: ProjectState) -> dict:
+        try:
+            return node(state)
+        except ModelCallTimeout:
+            logger.warning("%s stage: a model call timed out; running the stage again", stage)
+            return node(state)
+
+    return wrapped
 
 
 def _better_round(best: dict | None, candidate: dict) -> dict | None:
