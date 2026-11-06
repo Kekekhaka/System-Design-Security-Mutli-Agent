@@ -75,4 +75,6 @@ def initial_state(requirements: str, max_revisions: int | None = None) -> dict:
         "blocking_history": [],
         "stop_reason": None,
         "brief_verified": False,
+        "best_round": None,
+        "selected_round": None,
     }

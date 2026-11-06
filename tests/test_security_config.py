@@ -92,4 +92,4 @@ def test_production_template_passes_its_own_checks(monkeypatch):
     monkeypatch.setattr(settings, "DATABASE_URL", "postgresql://u:p@db/x")
     assert production_config_problems() == []
     # The template's cap must leave room for one optimize request.
-    assert api_model_calls() == 91 <= settings.HARNESS_MAX_MODEL_CALLS
+    assert api_model_calls() == 77 <= settings.HARNESS_MAX_MODEL_CALLS

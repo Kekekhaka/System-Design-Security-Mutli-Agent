@@ -49,7 +49,7 @@ class HarnessState(TypedDict, total=False):
     winning_prompt: str
 
 
-SECURITY_AUDIT_CALLS = 3  # scope, analyze, validate
+SECURITY_AUDIT_CALLS = 4  # scope, analyze, validate, one retry of an inconsistent report
 
 
 def harness_max_revisions() -> int:
@@ -302,8 +302,8 @@ def get_harness_optimizer():
 def api_model_calls() -> int:
     """Upper bound on model calls for one /project/optimize request.
 
-    Per candidate attempt: every round is a design plus a 3-call audit, then
-    the judge's 3-call audit; a failed candidate is retried once. Plus one
+    Per candidate attempt: every round is a design plus a 4-call audit, then
+    the judge's 4-call audit; a failed candidate is retried once. Plus one
     propose call. (Retries of an empty reply inside a call are not counted.)
     """
     rounds = harness_max_revisions() + 1

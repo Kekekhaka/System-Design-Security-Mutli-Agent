@@ -243,16 +243,16 @@ def test_optimize_over_the_call_budget_is_refused_before_any_call(monkeypatch):
     monkeypatch.setattr(settings, "HARNESS_CANDIDATES", 3)
     monkeypatch.setattr(settings, "HARNESS_MAX_REVISIONS", 2)
     monkeypatch.setattr(settings, "MAX_REVISIONS", 5)
-    monkeypatch.setattr(settings, "HARNESS_MAX_MODEL_CALLS", 90)
+    monkeypatch.setattr(settings, "HARNESS_MAX_MODEL_CALLS", 114)
     token = client.post("/auth/token", json={"username": "budget"}).json()["access_token"]
     response = client.post(
         "/project/optimize",
         json={"requirements": "billing api"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    # 3 candidates x 2 attempts x (3 rounds x (1 design + 3 audit) + 3 judge) + 1 propose
+    # 3 candidates x 2 attempts x (3 rounds x (1 design + 4 audit) + 4 judge) + 1 propose
     assert response.status_code == 403
-    assert "91 model calls" in response.json()["detail"]
+    assert "115 model calls" in response.json()["detail"]
 
 
 def test_optimize_at_exactly_the_call_budget_is_allowed(monkeypatch):
@@ -260,7 +260,7 @@ def test_optimize_at_exactly_the_call_budget_is_allowed(monkeypatch):
     monkeypatch.setattr(settings, "HARNESS_CANDIDATES", 3)
     monkeypatch.setattr(settings, "HARNESS_MAX_REVISIONS", 2)
     monkeypatch.setattr(settings, "MAX_REVISIONS", 5)
-    monkeypatch.setattr(settings, "HARNESS_MAX_MODEL_CALLS", 91)
+    monkeypatch.setattr(settings, "HARNESS_MAX_MODEL_CALLS", 115)
     token = client.post("/auth/token", json={"username": "budget-edge"}).json()["access_token"]
     response = client.post(
         "/project/optimize",

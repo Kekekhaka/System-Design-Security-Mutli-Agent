@@ -28,7 +28,7 @@ def production_config_problems() -> list[str]:
     if settings.HARNESS_MAX_MODEL_CALLS <= 0:
         problems.append(
             "HARNESS_MAX_MODEL_CALLS must be set (one /project/optimize request "
-            "can otherwise make 160+ model calls)"
+            "can otherwise make 200+ model calls)"
         )
     return problems
 

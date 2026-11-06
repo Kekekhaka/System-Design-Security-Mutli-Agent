@@ -155,7 +155,8 @@ def build_analyze_prompt(
             "capability they explicitly require that the design omits or removes, add a "
             f'High finding with category "{REQUIREMENT_CATEGORY}" and quote the requirement. '
             "Changing how a capability is delivered to make it secure is not a finding, "
-            "and neither is a detail the requirements do not state."
+            "and neither is a detail the requirements do not state. Requirements the "
+            "design wrote for itself (labels such as F2 or N7) do not count."
         )
     return prompt
 
@@ -179,6 +180,7 @@ def build_validate_prompt(
         prompt += (
             f'Keep a "{REQUIREMENT_CATEGORY}" finding, at High severity with exactly that '
             "category, only if the requirement is explicit and the design really lacks the "
-            "capability; the requirements count as evidence for these findings only.\n\n"
+            "capability; drop any that cites only the design's own requirement labels. "
+            "The requirements count as evidence for these findings only.\n\n"
         )
     return prompt + "Validate the draft and produce the final report."

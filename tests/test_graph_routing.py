@@ -209,6 +209,120 @@ def test_a_new_revision_clears_the_verified_flag():
     assert update["brief_verified"] is False
 
 
+def test_lower_severity_requirement_findings_do_not_fail_verification():
+    from src.agents.security.report import REQUIREMENT_CATEGORY, Finding, SecurityReport, meets_brief
+
+    def report(severity):
+        finding = Finding(
+            severity=severity, category=REQUIREMENT_CATEGORY, location="F2",
+            problem="p", impact="i", fix="f",
+        )
+        return SecurityReport(summary="s", findings=[finding], finding_count=1)
+
+    assert meets_brief(report("Medium")) and meets_brief(report("Low"))
+    assert not meets_brief(report("High")) and not meets_brief(report("Critical"))
+
+
+class ReportSequenceLLM(ScriptedLLM):
+    """The validator returns these reports in order, repeating the last."""
+
+    def __init__(self, responses, reports):
+        super().__init__(responses)
+        self.reports = list(reports)
+
+    def with_structured_output(self, schema, **kwargs):
+        from tests.fakes import StructuredFake
+
+        def next_report(_):
+            return self.reports.pop(0) if len(self.reports) > 1 else self.reports[0]
+
+        return StructuredFake(self, next_report, kwargs.get("include_raw", False))
+
+
+def _report(findings=(), count=None, summary="Done."):
+    from src.agents.security.report import Finding, SecurityReport
+
+    listed = [
+        Finding(severity=s, category="BOLA", location="x", problem="p", impact="i", fix="f")
+        for s in findings
+    ]
+    return SecurityReport(
+        summary=summary, findings=listed, finding_count=len(listed) if count is None else count
+    )
+
+
+def test_inconsistent_report_is_retried_once_and_can_recover():
+    from src.agents.nodes import make_security_node
+
+    llm = ReportSequenceLLM(["scope", "draft", "v1", "v2"], [_report(("Low",), count=2), _report(("Low",))])
+    result = make_security_node(llm)(
+        {"requirements": "brief", "architecture": "a", "api_spec": "s", "revision_count": 0}
+    )
+
+    assert is_approved(result["security_findings"])
+    assert result["blocking_history"] == [0]
+    assert result["brief_verified"] is True
+    assert len(llm.calls) == 4
+    assert "finding_count is 2 but 1 findings were listed" in llm.calls[3][-1].content
+
+
+def test_report_that_stays_inconsistent_is_rejected_and_not_counted():
+    from src.agents.nodes import make_security_node
+
+    llm = ReportSequenceLLM(["scope", "draft", "v"], [_report(("Low",), count=2)])
+    result = make_security_node(llm)(
+        {"requirements": "brief", "architecture": "a", "api_spec": "s", "revision_count": 0}
+    )
+
+    assert not is_approved(result["security_findings"])
+    assert result["blocking_history"] == [None]
+    assert result["best_round"] is None
+    assert result["brief_verified"] is False
+    assert len(llm.calls) == 4  # one retry only
+
+
+def test_unapproved_run_returns_the_round_with_fewest_blocking_findings(monkeypatch):
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 3)
+    monkeypatch.setattr(settings, "STOP_WHEN_NOT_IMPROVING", False)
+    design = lambda n: f"===ARCHITECTURE===\nArchitecture v{n}\n===API SPEC===\nspec v{n}"
+    responses = [design(1), "s", "d", "v", design(2), "s", "d", "v", design(3), "s", "d", "v"]
+    llm = ReportSequenceLLM(
+        responses,
+        [_report(("High", "High")), _report(("High",)), _report(("High", "High", "High"))],
+    )
+
+    result = build_multi_agent(llm=llm).invoke(initial_state("billing api"))
+
+    assert result["blocking_history"] == [2, 1, 3]
+    assert result["revision_count"] == 3
+    assert result["selected_round"] == 2
+    assert "v2" in result["architecture"] and "v2" in result["api_spec"]
+    assert result["security_findings"].count("[High]") == 1
+    assert not is_approved(result["security_findings"])
+
+
+def test_a_stopped_run_also_returns_its_best_round(monkeypatch):
+    monkeypatch.setattr(settings, "MAX_REVISIONS", 5)
+    design = lambda n: f"===ARCHITECTURE===\nArchitecture v{n}\n===API SPEC===\nspec v{n}"
+    responses = [design(1), "s", "d", "v", design(2), "s", "d", "v", design(3), "s", "d", "v"]
+    llm = ReportSequenceLLM(
+        responses, [_report(("High", "High")), _report(("High",)), _report(("High", "High"))]
+    )
+
+    result = build_multi_agent(llm=llm).invoke(initial_state("billing api"))
+
+    assert result["stop_reason"] == "no_progress"
+    assert result["selected_round"] == 2
+    assert "v2" in result["architecture"]
+
+
+def test_an_approved_run_keeps_its_last_round():
+    result, _ = run("billing api", [DESIGN_V1, *REJECT_ROUND, DESIGN_V2, *APPROVE_ROUND])
+
+    assert result["selected_round"] is None
+    assert "v2" in result["architecture"]
+
+
 def test_settings_repr_hides_secrets(monkeypatch):
     for name in ("OPENROUTER_API_KEY", "JWT_SECRET", "HARNESS_HMAC_KEY",
                  "OPENCODE_OPENROUTER_API_KEY", "DATABASE_URL", "LANGFUSE_SECRET_KEY"):

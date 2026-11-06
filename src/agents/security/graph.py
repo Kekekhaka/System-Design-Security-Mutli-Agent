@@ -124,12 +124,27 @@ def build_security_subgraph(llm, system_prompt: str | None = None, retriever=Non
                 "blocking_count": None,
                 "brief_verified": False,
             }
-        # An inconsistent report (count or summary disagreeing with the list)
-        # is never approved, but its listed findings are kept as feedback.
         reject_reason = inconsistency(report)
+        if reject_reason:
+            # Seen live: a design with no blocking findings was rejected only for
+            # a miscounted report. Ask once for a corrected one.
+            correction = HumanMessage(
+                content=(
+                    f"Your report was rejected: {reject_reason}. Resubmit the complete "
+                    "report with the findings list, finding_count and summary in agreement."
+                )
+            )
+            retried = call_with_deadline(
+                lambda: validator.invoke([*messages, correction]), "security validation"
+            ).get("parsed")
+            if isinstance(retried, SecurityReport):
+                report = retried
+                reject_reason = inconsistency(report)
+        # A report that stays inconsistent is never approved, but its listed
+        # findings are kept as feedback. Its count is not trusted as a measure.
         return {
             "security_findings": render_report(report, reject_reason=reject_reason),
-            "blocking_count": blocking_count(report),
+            "blocking_count": None if reject_reason else blocking_count(report),
             "brief_verified": bool(state.get("requirements"))
             and reject_reason is None
             and meets_brief(report),

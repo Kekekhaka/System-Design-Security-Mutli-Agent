@@ -17,4 +17,8 @@ class ProjectState(TypedDict):
     stop_reason: str | None
     # The latest audit had the brief and found no required capability missing.
     brief_verified: bool
+    # The audited round with the fewest blocking findings, and the round number
+    # returned when that is not the last one (None: the last round).
+    best_round: dict | None
+    selected_round: int | None
     next_agent: Literal["designer", "security", "FINISH"]

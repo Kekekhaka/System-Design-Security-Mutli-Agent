@@ -250,7 +250,8 @@ curl -N -X POST http://localhost:8000/project/design/stream \
 by the thread id `proj-{user_id}:{session_id}`.
 
 The response includes `final_architecture`, `api_spec`, `security_audit`,
-`approved`, `verified_against_brief`, `total_revisions` and `stop_reason`. For the
+`approved`, `verified_against_brief`, `total_revisions`, `selected_round` and
+`stop_reason`. For the
 payment example you should see the security agent flag the PCI-DSS violation, the
 designer switch to tokenization, and the second audit approve.
 
@@ -264,7 +265,11 @@ The loop runs until the audit approves or `MAX_REVISIONS` is reached, and it
 also stops early when a revision leaves at least as many Critical + High
 findings as the round before. That run ends unapproved with
 `stop_reason: "no_progress"`, saving the remaining rounds. Set
-`STOP_WHEN_NOT_IMPROVING=false` to always use every round.
+`STOP_WHEN_NOT_IMPROVING=false` to always use every round. A run that ends
+unapproved returns the audited round with the fewest Critical + High findings
+(the latest on a tie), not simply the last; `selected_round` says which. A report
+that contradicts itself is sent back to the validator once; if it still does, the
+round is not approved and is not eligible as the best.
 
 ## Deploying on a server
 
@@ -313,8 +318,8 @@ Each user can have one optimization in flight (429 otherwise); with
 The endpoint applies the same budget as `scripts/run_harness.py`:
 `HARNESS_REASONING_EFFORT` (default `none`), `HARNESS_MAX_REVISIONS`, and, when
 `HARNESS_MAX_MODEL_CALLS` is set, a 403 before any model call if the worst case
-(candidates x 2 attempts x (rounds x 4 + 3 judge calls) + 1) is above it. With
-the defaults that worst case is 163 calls, so on a hosted server set
+(candidates x 2 attempts x (rounds x 5 + 4 judge calls) + 1) is above it. With
+the defaults that worst case is 205 calls, so on a hosted server set
 `HARNESS_MAX_REVISIONS=1` or `2` and a cap.
 
 ```bash

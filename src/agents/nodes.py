@@ -78,14 +78,53 @@ def make_security_node(llm, system_prompt: str | None = None, retriever=None):
         )
         history = list(state.get("blocking_history") or [])
         history.append(result.get("blocking_count"))
+        round_number = state.get("revision_count", 0) + 1
+        brief_verified = bool(result.get("brief_verified"))
         return {
             "security_findings": result["security_findings"],
-            "revision_count": state.get("revision_count", 0) + 1,
+            "revision_count": round_number,
             "blocking_history": history,
-            "brief_verified": bool(result.get("brief_verified")),
+            "brief_verified": brief_verified,
+            "best_round": _better_round(
+                state.get("best_round"),
+                {
+                    "round": round_number,
+                    "blocking": result.get("blocking_count"),
+                    "architecture": state.get("architecture"),
+                    "api_spec": state.get("api_spec"),
+                    "security_findings": result["security_findings"],
+                    "brief_verified": brief_verified,
+                },
+            ),
         }
 
     return security_node
+
+
+def _better_round(best: dict | None, candidate: dict) -> dict | None:
+    """Keep the round with the fewest blocking findings; the latest wins a tie.
+
+    A round whose report could not be trusted (blocking None) never qualifies.
+    """
+    if candidate["blocking"] is None:
+        return best
+    if best is None or candidate["blocking"] <= best["blocking"]:
+        return candidate
+    return best
+
+
+def _finish_unapproved(state: ProjectState, **update) -> dict:
+    """End the loop, returning the best audited round rather than simply the last."""
+    best = state.get("best_round")
+    if best and best["round"] != state.get("revision_count"):
+        update.update(
+            architecture=best["architecture"],
+            api_spec=best["api_spec"],
+            security_findings=best["security_findings"],
+            brief_verified=best["brief_verified"],
+            selected_round=best["round"],
+        )
+    return {"next_agent": "FINISH", **update}
 
 
 def not_improving(history: list[int | None] | None) -> bool:
@@ -114,11 +153,13 @@ def supervisor_node(state: ProjectState) -> dict:
     limit = settings.MAX_REVISIONS
     if state.get("max_revisions") is not None:
         limit = max(0, min(state["max_revisions"], limit))
-    if is_approved(findings) or state.get("revision_count", 0) >= limit:
+    if is_approved(findings):
         return {"next_agent": "FINISH"}
+    if state.get("revision_count", 0) >= limit:
+        return _finish_unapproved(state)
     # A revision that did not reduce the blocking findings is unlikely to be
     # rescued by the next one; stop and leave the rounds unspent.
     if settings.STOP_WHEN_NOT_IMPROVING and not_improving(state.get("blocking_history")):
-        return {"next_agent": "FINISH", "stop_reason": "no_progress"}
+        return _finish_unapproved(state, stop_reason="no_progress")
 
     return {"next_agent": "designer"}

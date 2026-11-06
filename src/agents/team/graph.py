@@ -110,6 +110,7 @@ class TeamState(TypedDict, total=False):
     revision_count: int
     blocking_history: list[int | None]  # written by the shared security node
     brief_verified: bool  # likewise
+    best_round: dict | None  # likewise; team routing does not use it
     # build
     build: bool
     repo: str | None

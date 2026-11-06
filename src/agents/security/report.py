@@ -67,9 +67,14 @@ def inconsistency(report: SecurityReport) -> str | None:
 
 
 def meets_brief(report: SecurityReport) -> bool:
-    """False when the audit listed a capability the brief required but the design lacks."""
+    """False when the audit listed a required capability as missing, at blocking severity.
+
+    Seen live: Medium and Low findings under this category citing the design's own
+    labels rather than the brief, so lower severities do not count.
+    """
     return not any(
-        finding.category.strip().lower().startswith(REQUIREMENT_CATEGORY.lower())
+        finding.severity in BLOCKING_SEVERITIES
+        and finding.category.strip().lower().startswith(REQUIREMENT_CATEGORY.lower())
         for finding in report.findings
     )
 
